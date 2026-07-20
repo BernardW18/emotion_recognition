@@ -1,7 +1,7 @@
 # FER2013 人脸情感识别系统
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/BernardW18/fer2013-emotion-recognition/actions/workflows/ci.yml/badge.svg)](https://github.com/BernardW18/fer2013-emotion-recognition/actions/workflows/ci.yml)
+[![CI](https://github.com/BernardW18/emotion-recognition/actions/workflows/ci.yml/badge.svg)](https://github.com/BernardW18/emotion-recognition/actions/workflows/ci.yml)
 
 基于 PyTorch 的人脸表情识别系统，包含三个 CNN 模型的训练、评估与对比，以及 Streamlit 推理演示应用。
 
