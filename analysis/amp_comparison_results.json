@@ -1,0 +1,80 @@
+[
+  {
+    "model": "mini_cnn",
+    "amp": false,
+    "avg_step_ms": 21.46121999976458,
+    "data_load_ms": 0.3541300007782411,
+    "forward_ms": 7.240610000008019,
+    "backward_ms": 13.065509999432834,
+    "optimizer_ms": 0.8009699995454866,
+    "epochs_trained": 3,
+    "final_val_acc": 0.45444416999816895,
+    "final_val_loss": 0.9208790063858032,
+    "total_time_3_epochs": 12.347002506256104
+  },
+  {
+    "model": "mini_cnn",
+    "amp": true,
+    "avg_step_ms": 15.581219999148743,
+    "data_load_ms": 0.30202999914763495,
+    "forward_ms": 4.937829998380039,
+    "backward_ms": 9.500940002180869,
+    "optimizer_ms": 0.8404199994402006,
+    "epochs_trained": 3,
+    "final_val_acc": 0.43410423398017883,
+    "final_val_loss": 0.955430805683136,
+    "total_time_3_epochs": 14.644775390625
+  },
+  {
+    "model": "vgg_lite",
+    "amp": false,
+    "avg_step_ms": 52.44344000093406,
+    "data_load_ms": 0.294840001151897,
+    "forward_ms": 17.837169999984326,
+    "backward_ms": 32.812869999179384,
+    "optimizer_ms": 1.498560000618454,
+    "epochs_trained": 3,
+    "final_val_acc": 0.3675118684768677,
+    "final_val_loss": 1.0767451524734497,
+    "total_time_3_epochs": 20.334308385849
+  },
+  {
+    "model": "vgg_lite",
+    "amp": true,
+    "avg_step_ms": 29.79018999976688,
+    "data_load_ms": 0.24373000051127747,
+    "forward_ms": 9.9294399995415,
+    "backward_ms": 17.83455000113463,
+    "optimizer_ms": 1.7824699985794723,
+    "epochs_trained": 3,
+    "final_val_acc": 0.4307606816291809,
+    "final_val_loss": 0.9982218146324158,
+    "total_time_3_epochs": 15.352638006210327
+  },
+  {
+    "model": "micro_resnet",
+    "amp": false,
+    "avg_step_ms": 38.24200000090059,
+    "data_load_ms": 0.3731300006620586,
+    "forward_ms": 13.28706999993301,
+    "backward_ms": 23.177370000485098,
+    "optimizer_ms": 1.4044299998204224,
+    "epochs_trained": 3,
+    "final_val_acc": 0.49595990777015686,
+    "final_val_loss": 0.8181939721107483,
+    "total_time_3_epochs": 12.895318269729614
+  },
+  {
+    "model": "micro_resnet",
+    "amp": true,
+    "avg_step_ms": 24.565069998789113,
+    "data_load_ms": 0.3402899994398467,
+    "forward_ms": 7.874000001174863,
+    "backward_ms": 14.405069999338593,
+    "optimizer_ms": 1.9457099988358095,
+    "epochs_trained": 3,
+    "final_val_acc": 0.46085262298583984,
+    "final_val_loss": 0.9087435007095337,
+    "total_time_3_epochs": 12.867138624191284
+  }
+]

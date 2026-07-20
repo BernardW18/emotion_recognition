@@ -1,0 +1,43 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Python source files
+*.py text diff=python
+*.pyi text
+
+# Configuration
+*.yaml text
+*.yml text
+*.toml text
+*.cfg text
+*.ini text
+
+# Documentation
+*.md text
+*.rst text
+*.txt text
+
+# Jupyter notebooks
+*.ipynb text
+
+# CSV data
+*.csv text
+
+# Ignore files
+.gitignore text
+
+# Binary files — never diff
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
+# Model checkpoints
+*.pth binary
+*.pt binary
+*.pkl binary
+
+# Archives
+*.zip binary
+*.tar.gz binary

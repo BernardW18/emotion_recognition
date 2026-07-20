@@ -1,0 +1,49 @@
+# FER2013 情感识别系统 — .gitignore
+
+# 训练 checkpoint (~626MB)
+training/checkpoints/
+
+# 推理导出目录 (生成的 .pth 文件)
+inference/saved_models/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyc
+
+# pytest 缓存
+.pytest_cache/
+
+# Jupyter Notebook 检查点
+.ipynb_checkpoints/
+
+# 项目分析报告
+codebase_analysis_report.md
+modification_plan.md
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 工作记忆与学习日志
+.workbuddy/
+.learnings/
+
+# IDE/编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 最终报告和ppt
+report&ppt/
+
+# 原始数据（手动下载，不纳入版本控制）
+data/fer2013.csv
+data/archive/
+
+# 实验分析中间产物
+analysis_saved/

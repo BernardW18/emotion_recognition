@@ -1,0 +1,105 @@
+# ============================================================
+# FER2013 情感识别训练配置
+# 所有训练 Notebook 应从此文件读取配置，不硬编码
+# ============================================================
+
+# 数据配置
+data:
+  dataset_path: "data/fer2013.csv"
+  image_size: 48
+  num_classes: 7
+  class_names: ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
+
+# 数据加载性能配置（被 create_dataloaders() 读取）
+# 训练集用 num_workers 多进程并行增强 + 大 prefetch 缓冲
+# 验证/测试集自动使用 num_workers=0（无增强，无需多进程）
+dataloader:
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 6               # 预取更多批次，吸收变换时序抖动
+  class_balanced_sampling: true    # 使用 WeightedRandomSampler 过采样少样本类
+
+# 数据增强
+augmentation:
+  enabled: true
+  random_horizontal_flip: 0.5
+  random_rotation: 10
+  random_affine_translate: 0.1    # 微小平移（图像尺寸的比例）
+  color_jitter_brightness: 0.2    # 亮度抖动
+  color_jitter_contrast: 0.2      # 对比度抖动
+  random_erase: true              # 启用 RandomErasing 增强泛化（p=0.1）
+
+  # 类别特定增强：对指定类别应用更强的数据变换（用于缓解极度长尾）
+  class_specific:
+    enabled: true
+    target_classes: [1]             # 目标类别索引（1 = Disgust）
+    augment_prob: 0.8              # 80% 的目标样本应用额外增强
+    extra_rotation: 20             # 额外旋转角度（度）
+    extra_translate: 0.15          # 额外平移比例
+    extra_erase_prob: 0.2          # 额外随机擦除概率
+
+  # MixUp 混合增强（batch 级别，在训练循环中应用）
+  # 混合两张图像及其标签，使模型学习线性插值行为
+  mixup:
+    enabled: false                # 默认关闭（实验性功能，需手动开启）
+    alpha: 0.2                    # Beta 分布参数，越大混合越均匀
+
+# 训练超参数（默认值，各模型可单独覆盖）
+training:
+  batch_size: 128
+  num_epochs: 50
+  learning_rate: 0.001
+  weight_decay: 1.0e-4
+  optimizer: "adam"               # adam / sgd / adamw
+  activation: "relu"              # relu / leaky_relu / elu / gelu
+  scheduler: "cosine_warm"         # cosine / cosine_warm / step / plateau / none
+  scheduler_step_size: 10
+  scheduler_gamma: 0.5
+  # scheduler_t0: CosineAnnealingWarmRestarts 第一个周期长度
+  #   优先级: 模型级 scheduler_t0 > 全局 scheduler_t0 > num_epochs 推导(max(num_epochs//3, 5))
+  #   当前 30 配合 T_mult=2 → 周期 30/60/120/...（可注释此行以让 num_epochs 自动推导）
+  scheduler_t0: 30
+  patience: 10                     # EarlyStopping 耐心值（val_acc 无改善轮数上限）
+  val_loss_patience: 15            # val_loss 持续上升耐心值（0 表示不启用）
+  val_loss_threshold: 1.05         # val_loss 触发倍率（1.05 = 上升超过 5% 即触发）
+  loss_type: "focal"               # 损失函数: "focal" (标准 Focal) / "cb_focal" (Class-Balanced Focal)
+  cb_focal_beta: 0.999             # CB Focal Loss 的 beta 参数（仅在 loss_type="cb_focal" 时生效）
+  amp: true                       # 混合精度训练（GPU 自动启用，CPU 无效）
+  torch_compile: false             # torch.compile 编译模型（Windows 不支持，自动跳过）
+  torch_compile_mode: "reduce-overhead"  # 编译模式: default / reduce-overhead / max-autotune
+  gradient_accumulation_steps: 1  # 梯度累积步数（>1 时显存不足可用）
+  max_grad_norm: 1.0              # 梯度裁剪阈值（0 表示不裁剪）
+
+# 模型特定覆盖
+models:
+  mini_cnn:
+    learning_rate: 0.0005
+    batch_size: 256               # ~50K 参数，独显直连可加大 batch
+    num_epochs: 30
+    dropout: 0.3
+    activation: "relu"
+
+  vgg_lite:
+    learning_rate: 0.0003
+    batch_size: 128               # ~1.5M 参数，独显直连适度加大
+    num_epochs: 90
+    dropout: 0.5
+    activation: "relu"
+
+  micro_resnet:
+    learning_rate: 0.0003
+    batch_size: 128               # ~400K 参数，独显直连可加大 batch
+    num_epochs: 90
+    dropout: 0.3
+    activation: "gelu"            
+
+# 保存策略
+checkpoint:
+  save_best: true                 # 保存验证集最优模型
+  save_every_n_epochs: 5          # 每 N 个 epoch 保存一次
+  monitor_metric: "val_acc"       # 监控指标：val_acc / val_loss
+  max_checkpoint_files: 5         # 最大保留定期断点数量（不含 best_model）
+
+# 随机种子
+seed: 42
