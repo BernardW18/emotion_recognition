@@ -1,24 +1,30 @@
 """
 批级张量增强（PB01）— 训练循环内按批执行的向量化增强（CPU，float32）。
 
-与 legacy 逐样本增强（data.dataloader.build_train_transform，torchvision 管道）相比：
-  - 参数、概率、顺序、类别条件保持一致（同分布），随机序列不同——
-    不能称为原实现逐位等价；协议中记录实现版本与种子派生规则。
-  - 随机性由每批确定性种子派生：seed_batch = sha256(train_seed|epoch|batch_idx)，
-    批内逐样本独立采样。同一 (epoch, batch_idx) 在连续训练与断点恢复中复算出
-    同一批增强参数（批次序列本身由 S01 的 sampler/loader generator 状态恢复保证）。
-  - 已知实现差异（相对 legacy，同分布但不对齐到逐位）：
-      * 几何变换用双线性插值（legacy v1 张量路径默认 nearest）；
-      * rotate 与 translate 合并为单次仿射（一次重采样；legacy 为两次）；
-      * 颜色顺序按 50/50 随机（对齐 legacy ColorJitter 的 randperm 行为）。
+与 legacy 逐样本增强（data.dataloader.build_train_transform，torchvision 管道）的关系
+（T05 更正）：**独立增强实现**——部分参数范围与门控概率沿用 legacy，但像素输出
+分布不同（见下「batched-v1 冻结规则」），**不能称为「同分布」**，也不逐位等价。
+随机性由每批确定性种子派生：seed_batch = sha256(train_seed|epoch|batch_idx)，
+批内逐样本独立采样；同一 (epoch, batch_idx) 在连续训练与断点恢复中复算出同一批
+增强参数（批次序列本身由 S01 的 sampler/loader generator 状态恢复保证）。
+
+batched-v1 冻结规则（版本号对应以下行为；任何规则变更必须升级版本号——版本随训练
+协议快照记录，切换实现版本会拒绝精确续训）：
+  - 几何：flip → rotate → translate 合并为单次**双线性**仿射（affine_grid + grid_sample，
+    align_corners=False、padding=0）；legacy v1 为 nearest 插值且旋转/平移各重采样一次。
+  - 平移离散化：比例先 round 到整像素（对齐 v1 RandomAffine 的 int(round(...))）。
+  - 颜色：brightness 乘性无 clamp；contrast 为逐样本均值混合并 clamp 到 [0,1]；
+    两者先后顺序按 50/50 随机（对齐 v1 ColorJitter 的 randperm 行为）。
+  - 擦除：基础 p=0.1 / 类别增强 p=extra；面积比、宽高比与最多 10 次尝试对齐
+    v1 RandomErasing 语义。
+  - 类别条件：目标类别以 augment_prob 门控，增强链 rot → translate → erase。
 
 顺序（对齐 legacy Compose 顺序）：
   flip → rotate → translate → brightness/contrast（随机先后）→ erase(p=0.1)
   → 类别条件增强（rot → translate → erase(p=extra)，以 augment_prob 门控）。
 
 输入输出约定：images 为 CPU 上的 (B,1,H,W) float32 张量、值域 [0,1]；
-增强后亮度可轻微超出 [0,1]（与 legacy brightness 无 clamp 一致）；
-contrast 混合后 clamp 到 [0,1]（与 v1 _blend 一致）。调用应发生在 .to(device) 之前。
+增强后亮度可轻微超出 [0,1]；调用应发生在 .to(device) 之前。
 """
 
 from __future__ import annotations

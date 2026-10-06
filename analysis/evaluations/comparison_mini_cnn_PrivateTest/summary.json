@@ -1,5 +1,5 @@
 {
-  "evaluated_at": "2026-10-07T04:18:10.038180",
+  "evaluated_at": "2026-10-07T05:52:08.187977",
   "checkpoint": {
     "path": "D:\\Document\\Unniversity\\emotion_recognition\\inference\\saved_models\\mini_cnn_best.pth",
     "sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",

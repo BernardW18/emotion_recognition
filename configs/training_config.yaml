@@ -14,9 +14,13 @@ data:
 # 训练集用 num_workers 多进程并行增强 + 大 prefetch 缓冲
 # 验证/测试集自动使用 num_workers=0（无增强，无需多进程）
 dataloader:
-  num_workers: 4
+  # T02：默认 non-persistent + workers=0。0/2/4 完整流程配对测量（各 3 组，mini_cnn、batched）：
+  # w0 中位 4.76s vs w2 11.03s / w4 11.79s——Windows 非持久 worker 每轮 spawn 成本 ~2.8-3.0s，
+  # 批级增强后数据准备已非瓶颈，w0 总耗时最优且天然支持精确续训。
+  # 持久 worker（persistent_workers=true）的断点会被精确恢复明确拒绝。
+  num_workers: 0
   pin_memory: true
-  persistent_workers: true
+  persistent_workers: false
   prefetch_factor: 6               # 预取更多批次，吸收变换时序抖动
   class_balanced_sampling: true    # 使用 WeightedRandomSampler 过采样少样本类
 
@@ -24,7 +28,8 @@ dataloader:
 augmentation:
   enabled: true
   # 增强实现（PB01）：legacy = 逐样本 torchvision 管道；batched = 批级张量增强（训练循环内，更快）
-  # 两者参数/概率/顺序/类别条件一致（同分布），随机序列不同；切换会改变训练轨迹，需重新训练
+  # 独立实现（部分参数范围/门控沿用；像素输出分布不同——审核 T05）；切换会改变训练轨迹，
+  # 需重新训练；实现版本（batched-v1）随协议快照记录，切换版本拒绝精确续训
   impl: "batched"
   random_horizontal_flip: 0.5
   random_rotation: 10

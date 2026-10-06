@@ -13,6 +13,7 @@ FER2013 模型训练 CLI
     python training/train.py --model micro_resnet --diagnose --steps 5
 """
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -31,9 +32,31 @@ from training.trainer import (
     load_config,
     set_seed,
 )
+from utils.comparison_check import FROZEN_PROTOCOL_PATH
 from utils.config_validation import validate_config
-from utils.model_spec import build_model_from_spec, make_spec_from_config
+from utils.model_spec import build_model_from_spec, file_sha256, make_spec_from_config
 from utils.stdio import ensure_utf8_stdio
+
+
+def _load_frozen_protocol() -> dict:
+    """T06：正式训练（--purpose formal）要求冻结协议文件存在且字段齐全。
+
+    返回记录（含文件字节 SHA-256），写入 run_meta.frozen_protocol；
+    正式实验准入判定时复核该 SHA 与当前文件一致（防止事后更换冻结内容）。
+    """
+    path = FROZEN_PROTOCOL_PATH
+    if not path.exists():
+        raise SystemExit(
+            f"正式训练需要先冻结比较协议：{path} 不存在。\n"
+            "冻结流程见 docs/comparison_protocol_draft.md §6；冻结后创建该文件"
+            '（至少含 "protocol_id" / "frozen_at" / "git_commit" 字段）。'
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for key in ("protocol_id", "frozen_at", "git_commit"):
+        if not data.get(key):
+            raise SystemExit(f"冻结协议文件缺少字段 {key!r}: {path}")
+    data["file_sha256"] = file_sha256(path)
+    return dict(data)
 
 
 def parse_args():
@@ -63,6 +86,10 @@ def parse_args():
               "不指定则从头训练（创建新 run）"),
     )
     parser.add_argument("--diagnose", action="store_true", help="仅运行性能诊断（不训练）")
+    parser.add_argument(
+        "--purpose", choices=["smoke", "formal"], default="smoke",
+        help="run 用途声明（T06：默认 smoke=流程验证、非正式；formal 需冻结协议文件存在）",
+    )
     parser.add_argument("--steps", type=int, default=10, help="诊断步数 (默认: 10，含 3 步预热)")
     parser.add_argument(
         "--config", type=str, default=None,
@@ -98,6 +125,9 @@ def main():
 
     # ---- 启动前集中校验（F13）----
     validate_config(config, model_name=model_name)
+
+    # ---- T06：用途声明与冻结协议绑定（--purpose formal 需冻结文件存在）----
+    frozen_protocol = _load_frozen_protocol() if args.purpose == "formal" else None
 
     seed = config["seed"]
     deterministic = bool(config["training"].get("cudnn_deterministic", False))
@@ -164,6 +194,7 @@ def main():
             class_counts=train_loader.dataset.class_counts,
             run_dir=diagnose_dir / "diagnose",
             run_meta_extra={"cli_args": vars(args), "purpose": "diagnose"},
+            run_purpose="diagnose",
         )
         diag_trainer.diagnose(num_steps=max(args.steps - 3, 5))
         diag_trainer._persist_run_meta(status="diagnose_completed")
@@ -180,6 +211,8 @@ def main():
         class_counts=train_loader.dataset.class_counts,
         run_dir=run_dir,
         run_meta_extra={"cli_args": vars(args)},
+        run_purpose=args.purpose,
+        frozen_protocol=frozen_protocol,
     )
 
     print(f"  参数量: {trainer.total_params:,}\n")

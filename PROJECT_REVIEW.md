@@ -8,13 +8,13 @@
 
 本轮只处理当前项目的正确性、可复现性、训练可靠性和材料表达。保留 MiniCNN、VGGLite、MicroResNet 三个现有模型以及 FER2013 数据；不提出新研究问题，不新增架构、分类头改造、其他数据集或论文迁移任务。对现有损失、采样、增强和 AMP 的检查，是为了确认项目已有功能及结论是否成立。
 
-第二轮重构已有明显进展：112 项测试、Ruff、依赖检查通过，Windows CUDA 可用；诊断隔离、正常重复 fit、设备选择、增强总开关和统一配置校验的回归通过。但仍独立复现 3 项 P1 续训缺陷、2 项 P2 工具/材料问题，mypy 有 1 个错误。**本轮完整验收暂不通过，正式重训的正确性前置尚未齐备。** 完整证据、逐项修复方案与验收标准见下文“第二轮重构独立审核”；新增 PB01–PB05 及实测结果见“训练与推理性能专项审核”。历史执行记录不能代替当前结论。
+第三轮重构与性能优化独立审核已完成：197 项测试、Ruff、mypy 与依赖检查通过，Windows CUDA 可用；上一轮常规反例已修复，批级增强和快速预测明显提速。但另复现 3 项 P1 续训问题与 3 项 P2 缓存/材料问题（T01–T06）。**完整验收暂不通过；默认配置的恢复能力及断点完整性需在正式训练前解决。** 本轮实测、修复方案和验收标准见末尾“第三轮重构与性能优化独立审核”。
 
-本文中的“验收标准”是各项修复需要满足的条件。**2026-10-07 第二轮独立审核，提交 `9c2f8ed918e71fbe236243f30bbd0e79f75b2066`**：F05/F09 仍部分通过（S01–S03）；F13 的上一轮返修通过；F07 的 CE 基线代码就绪，但 F07/F11 的协议冻结、有效预算落地与正式比较尚未完成；F18/F19 仍有 S04/S05。**不启动正式重训、不修改模型或训练实现**；本次更新审核文档、结构化证据及 README 状态说明。P0 表示正式重训前需要完成，P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成；PB 项的优先级 1/2 为提效顺序，不能把测试数量或性能结果代替正确性验收。
+本文中的“验收标准”是各项修复需要满足的条件。**当前基准为 2026-10-07 提交 b75d8e3，最新结论以第三轮独立审核为准**；第二轮及性能初审保留为历史记录。F05/F09 尚有 T01–T03，缓存完整性见 T04，增强语义和正式实验准入见 T05/T06；F07/F11 的冻结协议与正式比较仍未完成。本次不改训练实现、不启动正式重训，只更新审核记录及相关文档。P0 表示正式重训前需要完成，P1 表示相关功能或结论使用前需要完成，P2 表示演示/对外材料前需要完成；性能项不能代替正确性验收。
 
 ## Windows CUDA 环境：已安装并验收
 
-本节保留历史环境与三模型最小更新的核验记录；第二轮独立审核已复核环境并运行 112 项测试，新增结果见末尾与证据文件的新字段。历史 36 项测试和四批次 GPU 更新结果不冒充本次正式训练。
+本节保留历史环境与三模型最小更新记录；第三轮已复核当前环境并运行 197 项测试，新增结果见末尾及证据文件。历史 36 项测试与四批次 GPU 更新不冒充本次正式训练。
 
 本项目统一使用 Windows 虚拟环境：`D:\Document\Unniversity\emotion_recognition\.venv\Scripts\python.exe`。本轮已检查用户安装后的实际环境；后续 Python 操作继续使用这个解释器。Notebook 的 `Emotion Recognition (.venv)` 内核也已核对指向此路径。`D:\AI` 的 WSL 约定不扩展到本项目。
 
@@ -586,6 +586,8 @@ R01–R07 是本次复现的正确性返修项；R08 是正式比较的未完成
 
 ## 第二轮重构独立审核（2026-10-07）
 
+**历史基准 9c2f8ed：** 以下为当时的独立结论，当前修复/返修状态见末尾第三轮独立审核。
+
 ### 当前结论与核验边界
 
 **结论：多数上一轮返修已完成，完整验收暂不通过。** 在提交 `9c2f8ed918e71fbe236243f30bbd0e79f75b2066` 上，独立复现 **3 项 P1 续训可靠性问题（S01–S03）和 2 项 P2 工具/材料问题（S04/S05）**。项目已有较完整的工程基础，但还不能承诺“默认配置精确续训”“所有质量检查通过”或“三模型正式比较完成”。先修复并验收这些问题，再冻结当前模型的训练比较方案。
@@ -732,8 +734,9 @@ R01–R07 是本次复现的正确性返修项；R08 是正式比较的未完成
 **状态：** 已实施（2026-10-07，第四轮；`augmentation.impl` 开关，legacy 路径保留对照）。
 
 - 实现：`data/batch_augment.py`（版本 `batched-v1`，批种子规则 `sha256(train_seed|epoch|batch_idx)`，
-  随训练协议快照记录）；参数、概率、顺序、类别条件与 legacy 对齐，随机序列不同——
-  **不称逐位等价**（插值方式（双线性 vs nearest）与重采样次数差异已记录）。
+  随训练协议快照记录）；**独立增强实现**：部分参数范围/门控沿用、像素输出分布不同
+  （审核 T05 更正，双线性插值/单次重采样等差异见文末第五轮记录）——不称"同分布"、
+  不称逐位等价。
 - 正确性：13 项专项测试（确定性 / 参数范围 / 几何方向与组合对照（质心对齐 v1 源码公式，
   误差 < 0.1px）/ 类别门控 / 防御）；S01 恢复扩展：workers{0,2} 下“连续 vs 恢复”
   逐批增强输出哈希逐位一致；`impl=batched` 与逐样本 transform 并存时拒绝启动（防双重增强）。
@@ -902,3 +905,213 @@ R01–R07 是本次复现的正确性返修项；R08 是正式比较的未完成
 - **清理**：`.dev_tmp/` 全部探针与临时输出（含配对 run 目录与评估输出）记录后删除；
   正式缓存 `data/cache/fer2013_uint8-v1/`（可重建派生物，已列入 .gitignore）保留；
   原 CSV（SHA 3b8d9617…）、历史权重/评估/报告/PPT 未改动。
+
+## 第三轮重构与性能优化独立审核（2026-10-07）
+
+**审核基准：** 提交 b75d8e34c1b5c8ff20ce050157d1f90f55d9a075，对比上一轮 9c2f8ed918e71fbe236243f30bbd0e79f75b2066。本节复核作者文中的“第三轮修复”和“第四轮性能修复”执行记录；前文保留为历史证据。
+
+**结论：常规路径与性能优化已有明显进展，完整验收仍未通过。** 全部现有质量检查通过，上一轮具体反例的常规修复已复核；另复现 T01–T06 六项问题，其中 T01–T03 是 P1 续训问题。三模型统一预算已落地，正式协议仍未冻结，多 seed 正式训练及消融结果尚未形成。当前可以展示工程实现和历史权重的可追溯评估，不能把短训练、历史分数或速度提升当作新模型训练结论。
+
+### 检查与旧问题复核
+
+| 检查 | 本轮独立结果 |
+|---|---|
+| Windows Python / torch / torchvision | 3.10.11 / 2.14.1+cu130 / 0.29.1+cu130，CUDA 实际矩阵运算通过 |
+| pytest | **197 passed，7 warnings，75.04 s** |
+| Ruff / mypy / pip check | 全部通过；mypy 42 个源文件无错误 |
+| S01 原反例 | workers=0/2、非持久 workers 的连续/恢复及增强/采样组合通过；改变 workers 或使用持久 workers 被拒绝。默认配置另见 T02 |
+| S02 原反例 | 完整配置快照、运行时调度器参数、此前漏项拒绝和白名单回归通过；状态完整性另见 T03 |
+| S03 原反例 | 同实例中断后回滚到完整 last 的回归通过；显式加载 partial 另见 T01 |
+| S04 原反例 | legacy/new run 混排、run 不匹配、协议不一致的回归通过；正式实验准入另见 T06 |
+| S05 | 原 mypy 错误已消除 |
+| 预算配置 | 主/基线配置的三个模型均为 LR=3e-4、batch=128、上限 90 epochs |
+| 受保护材料 | 107 个文件审核前后 SHA-256 一致，包含 CSV、缓存、原权重、runs、分析产物及两份 DOCX/PPTX |
+
+197 是项目现有测试数量，以下临时反例和性能探针不算入该数字。所有 Python 操作使用项目 Windows .venv。本轮只修改审核文档、结构化证据、README 和协议草案的说明；未修改实现/测试，未正式重训，未导出权重，未修改报告或 PPT，不增设个人贡献清单。
+
+### 性能复核：提升有效，但须限定测量口径
+
+同一 RTX 5070 Ti Laptop GPU，CPU 4 线程，沿用现有缓存与固定权重。增强测试为 7 组；GPU 预测为完整 PublicTest 3,589 行、batch=64、预热后 3 组交替配对，表中为中位数。
+
+| 路径 | 原实现 | 新实现 | 本轮结论 |
+|---|---:|---:|---|
+| CPU 128 张常规/类别增强 | 56.36 ms | 1.83 ms | 耗时 -96.8%；输出分布改变，见 T05 |
+| MiniCNN GPU 预测阶段 | 0.6812 s | 0.03364 s | 耗时 -95.1% |
+| VGGLite GPU 预测阶段 | 0.8307 s | 0.17415 s | 耗时 -79.0% |
+| MicroResNet GPU 预测阶段 | 0.7412 s | 0.09276 s | 耗时 -87.5% |
+| 已存在缓存的工厂调用 | 本轮未重跑旧工厂 | 首次 0.2279 s；同进程热调用中位 0.00399 s | 不含启动/遍历 workers，也不是首次缓存构建时间 |
+| MiniCNN 服务层默认分类 | 首次 4.18 ms | 同键热命中中位 0.0057 ms | 1 次实算、7 次命中，Grad-CAM/绘图均 0 次 |
+
+三份历史权重在 **CPU/CUDA 各自设备内**，新旧路径的完整 PublicTest 标签、预测和概率一致，6 组最大概率差均为 **0**；GPU 三次配对同样为 0。CPU 单次对照耗时分别为 1.724→1.121 s、6.330→5.711 s、2.490→1.846 s，仅作核对与趋势说明。CPU 与 CUDA 不要求逐位一致，例如 MiniCNN 本轮 accuracy 相差 1/3,589；这不影响同设备新旧实现一致。
+
+**口径限制：** 预测阶段含旧路径解析、新路径归一化、传输、前向及概率回传；不含公共 CSV 读取、缓存构建、模型加载、指标计算或落盘。服务层分类不含浏览器、网络、模型加载或热力图渲染。作者记录的“完整训练 -88.4%/-39.0%”“完整评估 -96.0%”保留为其短程测量，本轮未重复整套流程，不能替换成长期训练保证。PB01 的“P95（max 代理）”只能作为观测最大值，不能视为真实 P95 验收。
+
+| 性能项 | 当前状态与下一步 |
+|---|---|
+| PB01 批级增强 | 提速、断点复算回归通过；语义表述未通过（T05），完整流程和真实 P95 仍需记录 |
+| PB02 uint8 缓存 | 命中速度、正常数据保真与轻量 worker 引用通过；热命中完整性有 T04，部分通过 |
+| PB03 fused Adam | 可选实现及数值测试通过；完整流程无稳定 ≥5% 收益，默认关闭合理 |
+| PB04 按需 Grad-CAM / 缓存 | 应用/服务回归通过，默认服务计数独立复核通过；浏览器端到端 P95 未测 |
+| PB05 快速预测 | 六组数值一致、GPU 预测阶段提速通过；完整评估及缓存稳健性仍按原标准和 T04 验收 |
+
+重复解码和逐张增强已不再是原来的主要开销。继续优化应优先测 **Windows 非持久 workers 每轮启动/取数等待**及实际 GPU 计算，不沿用旧瓶颈占比：T02 修复后，在 workers=0/2/4 下做相同增强实现、相同预算的至少 3 组完整“加载→训练→验证→保存”配对，分开记录首轮、后续轮、取数、增强、GPU step、验证/保存及峰值内存，以总耗时选择默认值。真实批次 P95 从至少 100 个预热后的批次样本计算；长训练收益另作观察。本轮不默认启用 fused Adam 或 channels_last。
+
+### T01 · P1 · 显式加载 partial 断点绕过中断回滚（F09 / S03）
+
+**位置：** [training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:575)、[training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:703)。
+
+**问题与证据：** 同实例回滚已修好，但显式加载 interrupted 断点只警告，随后清除 _partial_state，新的 Trainer 不回滚未完成轮的更新。临时 MiniCNN（48×48、3 类、dropout=0、CPU、16 样本、batch=4、seed=71）训练一轮，再更新一批并中断；显式加载后训练一轮：history 为 2 轮，Adam step 却为 **9**，连续两轮为 **8**，最大参数差 **0.0206248**。恢复事件为 protocol_verified=true，无 rollback 事件。
+
+**修复方案：** 修改真实状态或原文件前拒绝 partial=True 的精确续训，指向同 run 的完整 last；也可核验同源完整 last 后自动回滚。若提供近似恢复，须单独命名、明确非精确并另建 run，不能沿用两轮历史表达同一训练过程。
+
+**验收标准：** CLI/API 显式加载“第一轮中断”“一轮后单批/多批中断”“训练结束但验证前中断”都覆盖。有完整 last 时恢复后逐批输入、模型/BN、优化器 step、调度器、scaler、history、RNG 与连续训练匹配；无 last 则拒绝。拒绝前后真实状态和产物 hash 不变，不能再出现 9 对 8 的更新次数。
+
+**状态：已修复（2026-10-07，第五轮）。** 显式加载 partial 断点时自动回滚到同 run 完整 last
+（同 run_id + 非 partial），回滚记录于 `resume_events.notes`；无完整 last / last 亦 partial /
+last 不同 run → 明确拒绝，拒绝前后状态与文件 SHA 不变。API 与 CLI
+（`train.py --resume <interrupted>`）端到端均验证：污染 partial 被丢弃、参数与连续训练匹配、
+Adam step 不再出现 9 对 8。回归见 `tests/test_training_integrity.py`（三类中断场景 + 负例）
+与第五轮执行记录。
+
+### T02 · P1 · 默认配置产生无法精确续训的断点（F09 / S01）
+
+**位置：** [configs/training_config.yaml](D:/Document/Unniversity/emotion_recognition/configs/training_config.yaml:17)、[configs/baseline_config.yaml](D:/Document/Unniversity/emotion_recognition/configs/baseline_config.yaml:28)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:528)。
+
+**问题与证据：** 两份配置均为 workers=4、persistent_workers=true，加载逻辑正确拒绝这种来源的精确恢复，使默认训练→暂停→resume auto 不能闭环。作者成功的 20261007_041818_seed42 使用临时配置关闭了持久 workers，不能证明当前默认配置可续训。临时构造并保存此配置的断点后，加载被资格检查拒绝；未启动实际 workers。
+
+**修复方案：** 正式主/基线配置统一关闭 persistent workers；优先 workers=0 建立可复现基线，再测 2/4 个非持久 workers。CLI/Notebook 使用同一设置，将有效 workers/persistence 写入冻结协议。持久模式可保留为明确不能精确续训的可选配置。
+
+**验收标准：** 不编辑临时 YAML，用主配置及基线配置分别做隔离短训练→暂停→resume auto→再训练，均能恢复；默认配置测试断言不启用 persistent workers。实际选定 workers 的精确一致性测试覆盖增强与加权采样；至少 3 组总耗时/内存配对测量记录非持久 workers 的每轮启动成本。
+
+**状态：已修复（2026-10-07，第五轮）。** 主/基线配置统一 `persistent_workers=false`、
+`workers=0`（防漂移测试覆盖）；0/2/4 非持久配对测量（各 3 组完整流程）：w0 中位 4.76s vs
+w2 11.03s / w4 11.79s（Windows 每轮 spawn 成本 ~2.8–3.0s，批级增强后数据准备已非瓶颈）——
+按总耗时选定 w0。主配置与基线配置分别完成隔离短训练 → `--resume auto` → 再训练闭环
+（均恢复成功；主配置 run 20261007_053942）。
+
+### T03 · P1 · RNG 状态缺项仍被接受为完整恢复（F09 / S02）
+
+**位置：** [training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:271)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:562)。
+
+**问题与证据：** 只要求 loader_rng 不为 None，内部跳过缺失键；全局 RNG 恢复失败也仅警告。临时带独立生成器与加权采样的完整断点，将 loader_rng 改为 {}，不改协议：加载成功，事件仍为 protocol_verified=true、notes=[]。采样器/loader 随机进度没有恢复，协议相同不能证明状态完整。
+
+**修复方案：** 增加状态完整性预检，按运行时要求逐项核验 loader/sampler generator、全局 RNG、模型/优化器、调度器及 AMP scaler。先用临时生成器/可验证对象检查类型和可恢复性，再提交真实状态；缺项或恢复失败拒绝，不写成功事件。分别记录“协议一致”和“完整状态恢复成功”，异常不改写原 run。
+
+**验收标准：** 分别删除必需生成器键、设为 None、提供非法 Tensor，删除/破坏全局 RNG，并覆盖调度器/AMP 必需状态；均在原状态和文件改变前拒绝。合法断点仍通过连续/恢复一致性；只对本来不存在的可选状态允许 None，不误拒绝无 scheduler、CPU 无 scaler 的训练。
+
+**状态：已修复（2026-10-07，第五轮）。** 新增恢复前状态完整性预检
+（`_verify_checkpoint_state`，只读 dry-run）：全局 RNG（python/numpy/torch/cuda 临时对象
+set_state 验证）、loader/sampler 生成器（键完整性 + 类型 + 值级）、调度器与 AMP scaler
+（副本加载 + 值级/记录对照——`load_state_dict` 不校验值类型，如 `T_0="bad"` 需另查）、
+模型/优化器结构；缺项/非法值一律在修改任何真实状态前拒绝。恢复事件分项记录
+`protocol_verified` 与 `state_integrity`；恢复失败不再仅警告。负例（删键/None/非法
+Tensor/破坏 RNG/调度器/scaler）全部覆盖；无 scheduler、CPU 无 scaler 不误拒；修复过程中
+发现的"GradScaler lazy 语义误拒合法 AMP 断点"已一并修正并回归。
+
+### T04 · P2 · 缓存热命中漏校验，标签/行号仍可写（PB02 / PB05）
+
+**位置：** [data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:332)、[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:365)、[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:94)。
+
+**问题与证据：** 损坏测试只覆盖第一次打开前。进程内缓存只比 x 文件名，热命中不检查三份文件新签名：临时缓存打开后将像素 95 改为 96，加载返回 96，文件实际 SHA 与元数据不同却未报错/重建。另 x 只读而 y/rows 可写；改为 99/9999 后新句柄读取到污染结果，指纹不变。uint8 直接解析 256 还会静默变为 0。反例仅操作临时 CSV/缓存。
+
+**修复方案：** 三份数组均只读；缓存绑定来源/生成版本及三份文件名/stat 签名，命中时廉价检查，变更后关闭引用并重验 SHA/重建。Windows 文件锁采用新一代文件名与原子 meta 切换；进行中的 run 遇到数据源变化应拒绝继续。像素先以足够宽的类型验证数量、整数性及 0–255 值域再转 uint8，拒绝非法标签/Usage。
+
+**验收标准：** 冷/热状态下修改、删除或损坏 x/y/rows、换来源均准确失效/拒绝；重建与源一致。三数组写入均失败，后续句柄/worker 不被污染；合法 0/255 逐位保真，256、负数、非整数/非法值明确失败。复测全部 28,709 Training 样本、指纹和轻量 pickle，至少 3 次复测热加载；不在逐样本路径做全量 SHA。
+
+**状态：已修复（2026-10-07，第五轮）。** 缓存升级 `uint8-v2`：meta 绑定每文件 stat 签名
+（size/mtime_ns），热命中与 worker 侧打开均做廉价 stat 快查（变化 → 完整 SHA/重建；
+训练中的 worker 明确拒绝继续）；x/y/rows 三数组全部只读；像素解析先以 float32 校验
+（数量/整数性/0–255 值域）再转 uint8（256/负数/非整数明确失败，不再静默截断），标签
+校验 0–6。复测：三划分全量 28,709+3,589+3,589 行逐位一致、指纹一致、dataset pickle
+748 B、热加载 ×3 ≈0.0003s、独立进程冷加载 ×3 ≈0.219s（v2 构建一次性 ~10s，变慢来自
+逐行合法性校验；热路径不在逐样本做全量 SHA）。测试 24 项。
+
+### T05 · P2 · 批级增强不能称为与 legacy“同分布”（PB01 / F07）
+
+**位置：** [data/batch_augment.py](D:/Document/Unniversity/emotion_recognition/data/batch_augment.py:5)、[docs/comparison_protocol_draft.md](D:/Document/Unniversity/emotion_recognition/docs/comparison_protocol_draft.md:55)、README 性能说明。
+
+**问题与证据：** 不只改变了种子：nearest 变为双线性，旋转/平移从两次重采样变为一次。独立反例使用 16 张二值图、只开启旋转：legacy 输出 (0,1) 小数像素 **0 个**，batched 输出 **31,614 个**。输出分布已不同，“同参数范围/同门控概率”不能证明输出同分布。
+
+**修复方案：** 本轮已纠正文档为“独立增强实现，部分参数范围/门控沿用，像素输出分布不同”，保留版本和种子规则；源码注释/YAML 说明留待实现修复轮同步。继续用 batched-v1 时冻结插值、重采样、平移离散化、颜色顺序/clamp 和擦除规则，所有比较模型/臂使用同一实现重训。若宣称语义等价，须先对齐这些规则，不能仅用质心误差或范围测试证明分布一致。
+
+**验收标准：** 全仓库不再无证据宣称输出同分布，二值反例作为行为回归；协议、代码和 run 元数据一致，切换实现版本拒绝精确续训。准确率/F1 结论由相同冻结增强实现的多 seed 实验支持，历史分数独立标注。完整流程提速及真实 P95 按 PB01 原标准另行验收。
+
+**状态：已修复（2026-10-07，第五轮）。** 全仓库停止"同分布"表述：源码 docstring、
+配置注释、README/协议统一为"独立增强实现（部分参数范围/门控沿用，像素输出分布不同）"；
+batched-v1 冻结规则（插值/重采样/平移离散化/颜色顺序与 clamp/擦除/类别条件/种子规则）
+写入源码注释（规则变更必须升级版本号）；二值反例固化为回归测试（legacy nearest 输出
+纯 0/1、batched 双线性产生小数像素）；实现版本变化 → 协议比对拒绝精确续训（测试覆盖）。
+准确率/F1 结论仍待同一冻结实现的多 seed 实验（正式训练前）。
+
+### T06 · P2 · 来源绑定成功不等于正式实验准入（S04 / F11 / F19）
+
+**位置：** [utils/comparison_check.py](D:/Document/Unniversity/emotion_recognition/utils/comparison_check.py:176)、[analysis/comparison_report.ipynb](D:/Document/Unniversity/emotion_recognition/analysis/comparison_report.ipynb:86)。
+
+**问题与证据：** formal 仅表达路径/run/协议绑定，不查正式用途、冻结记录或完成原因，run_meta 缺失也不强制拒绝。对当前仅 2 轮、README 明确标为流程验证的 20261007_041818_seed42，返回 **formal**。Notebook 对这种结果去掉来源警告且展示 formal，容易把短训练纳入正式成绩。该 run 产生于本次性能改动之前，也不证明当前 batched-v1 的正式效果。
+
+**修复方案：** 分离 run-bound 来源状态和 formal_eligible 实验准入。run 元数据记录正式/流程验证/诊断用途及冻结协议 ID/hash；正式入口要求有效 run_meta、冻结协议、配置/数据/run 绑定、完整断点和正常结束/明确早停。现有短 run 按核查记录标为 smoke，保持非正式。
+
+**验收标准：** 当前三个短 run 均显示“流程验证、非正式”，正式汇总前拒绝或排除；未冻结、缺元数据、diagnose/smoke、partial 等负例同样处理。来源完整但未获准的 run 可独立查看。正式合法 run 按上限或已登记早停完成，不机械要求恰好 90 轮；模型/臂/seed 聚合均追溯到冻结配置、history、checkpoint 与指标。
+
+**状态：已修复（2026-10-07，第五轮）。** 分离 run-bound 来源状态与 formal_eligible
+实验准入：validate 输出 `verdict=run-bound`（不再用"formal"字样）；新增
+`check_formal_eligibility`（formal 用途声明 + 冻结协议文件绑定一致（id + 文件 SHA-256）
++ 正常结束 + 完整断点 + 数据指纹）；`train.py` 增加 `--purpose smoke|formal`（默认
+smoke；formal 要求 `docs/comparison_protocol_frozen.json` 存在并写入 run_meta）。验证：
+当前 6 个真实 run 全部判定"非正式"；notebook 执行验证通过（来源 + 准入双显示与警示）；
+7 项准入判定矩阵测试 + 真实 run 回归。
+
+### 下一轮修复与验收顺序
+
+先完成 T01–T03，确保默认训练和中断恢复可靠；同步补 T04。T05 文档更正本轮已完成，下一轮同步源码说明并冻结实际行为；T06 分离来源与正式准入。保持全部现有检查通过，新增回归针对独立反例。
+
+随后按已有协议冻结方案、完成基线/消融和三模型多 seed 实验。不新增模型或研究题目，不重做报告/PPT，不要求个人贡献清单；本轮不启动正式训练。
+
+---
+
+## 第五轮修复（T01–T06）执行记录（2026-10-07）
+
+- **质量门槛（逐项独立退出码）**：pytest = **0**（**233 项通过**，81s）；ruff = **0**；
+  mypy = **0**（全项目 **43 个源文件**）。
+- **T01（partial 显式加载）**：显式加载 partial 断点 → 自动回滚到同 run 完整 last
+  （记录于 `resume_events.notes`）；无完整 last / last 亦 partial / 不同 run → 拒绝，
+  且拒绝前后真实状态与文件 SHA 不变。回归 16 项（`tests/test_training_integrity.py`，
+  含三类中断场景）；CLI e2e：真配置 run → 构造含额外更新的 partial →
+  `train.py --resume <interrupted> --epochs 1` → 日志"已自动回滚到同 run 完整断点
+  last.pth"、训练至第 3 轮、EXIT=0（不再出现 9 对 8 的更新计数）。
+- **T02（默认配置）**：主/基线配置统一 `persistent_workers=false`、`workers=0`
+  （防漂移测试覆盖）。0/2/4 非持久配对测量（各 3 组完整流程）：w0 中位 4.76s vs
+  w2 11.03s / w4 11.79s；每轮 spawn 成本 w2/w4 ~2.8–3.0s（e2 首批等待），w0 3–5ms——
+  按总耗时选定 w0。主配置与基线配置分别完成隔离短训练 → `--resume auto` → 再训练
+  闭环（主配置 run 20261007_053942；过程中 resume auto 误选基线最新 run 时被协议比对
+  正确拒绝——跨配置保护顺带验证）。
+- **T03（状态完整性预检）**：新增 `_verify_checkpoint_state`（只读 dry-run：全局 RNG
+  （python/numpy/torch/cuda 临时对象验证）、loader/sampler 生成器（键/类型/值级）、
+  调度器（副本加载 + 与断点记录的实际参数对照——`load_state_dict` 不校验值类型）、
+  AMP scaler（副本加载 + 值级）、模型/优化器结构）；缺项/非法值一律在修改任何真实
+  状态前拒绝。恢复事件分项记录 `protocol_verified` 与 `state_integrity`。修复过程中
+  发现并修正"GradScaler lazy 语义导致合法 AMP 断点被误拒"（改为校验来源 state 值，
+  测试回归覆盖）。
+- **T04（缓存完整性）**：缓存升级 `uint8-v2`——meta 绑定每文件 stat 签名，热命中与
+  worker 侧打开均 stat 快查、变化即 SHA/重建（训练中的 worker 拒绝继续）；x/y/rows
+  全部只读；像素解析先校验（数量/整数性/0–255）再转 uint8（256/负数/非整数明确失败）；
+  标签校验 0–6。复测：三划分全量逐位一致、指纹一致、pickle 748B、热加载 ×3 ≈0.0003s、
+  独立进程冷加载 ×3 ≈0.219s；v2 构建一次性 ~10.2s（逐行校验成本，热路径不受影响）。
+  测试 24 项；旧 v1 缓存目录（孤儿）已删除。
+- **T05（增强表述/冻结）**：全仓库停止"同分布"表述（源码/配置/README/协议统一为
+  "独立增强实现：部分参数范围/门控沿用，像素输出分布不同"）；batched-v1 冻结规则
+  （插值/重采样/平移离散化/颜色顺序与 clamp/擦除/类别条件/种子规则）写入源码注释；
+  二值反例固化为回归（legacy nearest → 纯 0/1；batched 双线性 → 大量小数像素）；
+  实现版本变化 → 协议比对拒绝精确续训（测试覆盖）。
+- **T06（准入分离）**：validate 输出 `verdict=run-bound`（来源绑定）；新增
+  `check_formal_eligibility`（formal 用途 + 冻结协议绑定一致 + 正常结束 + 完整断点 +
+  数据指纹）；`train.py --purpose smoke|formal`（默认 smoke；formal 要求
+  `docs/comparison_protocol_frozen.json` 存在并绑定入 run_meta）；冻结文件格式入协议
+  §6。验证：6 个真实 run 全部判定"非正式"；notebook 执行验证通过（来源 + 准入双显示
+  与警示）；准入判定矩阵 7 项 + 真实 run 回归测试。
+- **行为/接口变化**：默认 `num_workers=0`（含配置注释）；`--purpose` 新 CLI 参数；
+  显式 `--resume <partial>` 自动回滚语义；verdict 更名 run-bound；缓存 v2。
+- **清理**：`.dev_tmp` 探针与临时输出删除；`data/cache/fer2013_uint8-v1` 删除；
+  原 CSV（SHA 3b8d9617…）、历史权重/评估/报告未改动。
+- **边界（如实记录）**：T05 的准确率/F1 结论仍待同一冻结实现的多 seed 正式实验；
+  T06 冻结文件尚未创建（正式训练前执行冻结流程）；T02 配对为 2 轮短程完整流程。

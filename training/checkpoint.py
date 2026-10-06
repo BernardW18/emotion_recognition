@@ -46,6 +46,7 @@ __all__ = [
     "_format_duration",
 ]
 
+import copy
 import json
 import logging
 import os
@@ -205,19 +206,16 @@ def _capture_rng_state() -> dict:
     return state
 
 
-def _restore_rng_state(state: dict) -> list[str]:
-    """恢复 RNG 状态；返回未能恢复的项列表。"""
-    failed = []
+def _restore_rng_state(state: dict) -> None:
+    """恢复全局 RNG 状态（T03：调用前必须已通过状态完整性预检；失败即抛出，不静默降级）。"""
     try:
         pyrandom.setstate(state["python"])
         np.random.set_state(state["numpy"])
         torch.set_rng_state(state["torch"])
-        if torch.cuda.is_available() and "torch_cuda" in state:
+        if torch.cuda.is_available() and state.get("torch_cuda") is not None:
             torch.cuda.set_rng_state_all(state["torch_cuda"])
     except Exception as e:
-        failed.append(str(e))
-        logger.warning("RNG 状态恢复失败: %s", e)
-    return failed
+        raise RuntimeError(f"全局 RNG 状态恢复失败（状态完整性预检后意外失败）: {e}") from e
 
 
 def _protocol_diff(reference: dict, current: dict, path: str = "") -> list[str]:
@@ -268,25 +266,231 @@ def _capture_loader_rng(loader) -> dict:
     }
 
 
-def _restore_loader_rng(loader, state: dict | None) -> list[str]:
-    """恢复 loader 生成器状态；返回未能恢复项列表。"""
+def _restore_loader_rng(loader, state: dict | None) -> None:
+    """恢复 loader 生成器状态（T03：预检已保证键完整且可恢复；失败即抛出）。"""
     if state is None:
-        return ["断点缺少 loader_rng 状态"]
-    failed: list[str] = []
+        raise RuntimeError("断点缺少 loader_rng 状态（状态完整性预检后意外失败）")
     sampler = getattr(loader, "sampler", None)
     g_sampler = getattr(sampler, "generator", None)
     if state.get("sampler_generator") is not None:
-        if isinstance(g_sampler, torch.Generator):
-            g_sampler.set_state(state["sampler_generator"])
-        else:
-            failed.append("当前 sampler 无独立 generator，无法恢复其状态")
+        if not isinstance(g_sampler, torch.Generator):
+            raise RuntimeError("当前 sampler 无独立 generator，无法恢复其状态")
+        g_sampler.set_state(state["sampler_generator"])
     g_loader = getattr(loader, "generator", None)
     if state.get("loader_generator") is not None:
-        if isinstance(g_loader, torch.Generator):
-            g_loader.set_state(state["loader_generator"])
+        if not isinstance(g_loader, torch.Generator):
+            raise RuntimeError("当前 DataLoader 无 generator，无法恢复 base_seed 序列")
+        g_loader.set_state(state["loader_generator"])
+
+
+def _verify_checkpoint_state(trainer, checkpoint: dict) -> dict:
+    """
+    T03：恢复前的状态完整性预检（**只读验证，不修改任何真实状态**）。
+
+    按运行时要求逐项核验断点状态：全局 RNG（python/numpy/torch/cuda）、
+    loader/sampler 生成器、调度器、AMP scaler、模型与优化器结构。
+    所有"可恢复性"用临时生成器/副本（dry-run）验证，不触碰真实对象；
+    任何缺项/非法值/不可恢复项 → 抛出 RuntimeError（在修改真实状态或文件前拒绝）。
+
+    允许的可选缺省：本来不存在对应组件的训练（无 scheduler、CPU 无 scaler）
+    不要求断点携带其状态；其余"当前需要而断点缺失"一律拒绝。
+
+    Returns:
+        dict：各组件校验摘要（写入恢复事件的 state_integrity）
+    """
+    report: dict[str, str] = {}
+    problems: list[str] = []
+
+    # ---- 1) 全局 RNG（python / numpy / torch / cuda）----
+    rng = checkpoint.get("rng")
+    if not isinstance(rng, dict):
+        problems.append("缺少全局 RNG 状态（rng 字段缺失或非法）")
+    else:
+        for key in ("python", "numpy", "torch"):
+            if key not in rng or rng[key] is None:
+                problems.append(f"rng 缺少必需键 {key!r}")
+        if rng.get("python") is not None:
+            try:
+                pyrandom.Random().setstate(rng["python"])
+            except Exception as e:
+                problems.append(f"rng.python 非法（无法恢复）: {e}")
+        if rng.get("numpy") is not None:
+            try:
+                np.random.RandomState().set_state(rng["numpy"])
+            except Exception as e:
+                problems.append(f"rng.numpy 非法（无法恢复）: {e}")
+        if rng.get("torch") is not None:
+            try:
+                torch.Generator().set_state(rng["torch"])
+            except Exception as e:
+                problems.append(f"rng.torch 非法（无法恢复）: {e}")
+        if rng.get("torch_cuda") is not None:
+            if not torch.cuda.is_available():
+                problems.append("断点含 CUDA RNG 状态，但当前环境无 CUDA：无法完整恢复")
+            else:
+                try:
+                    for state_i in rng["torch_cuda"]:
+                        torch.Generator(device="cuda").set_state(state_i)
+                except Exception as e:
+                    problems.append(f"rng.torch_cuda 非法（无法恢复）: {e}")
+    report["global_rng"] = "ok"
+
+    # ---- 2) loader / sampler 生成器 ----
+    loader_rng = checkpoint.get("loader_rng")
+    if not isinstance(loader_rng, dict):
+        problems.append("缺少 loader_rng（loader/sampler 生成器状态）")
+    else:
+        sampler = getattr(trainer.train_loader, "sampler", None)
+        g_sampler = getattr(sampler, "generator", None)
+        g_loader = getattr(trainer.train_loader, "generator", None)
+        for key, gen, who in (
+            ("sampler_generator", g_sampler, "sampler"),
+            ("loader_generator", g_loader, "DataLoader"),
+        ):
+            state_i = loader_rng.get(key)
+            if isinstance(gen, torch.Generator):
+                if state_i is None:
+                    problems.append(
+                        f"断点缺少 {key}：当前 {who} 有独立生成器，无法复算其随机进度"
+                    )
+                else:
+                    try:
+                        torch.Generator().set_state(state_i)
+                    except Exception as e:
+                        problems.append(f"{key} 非法（无法恢复）: {e}")
+            elif state_i is not None:
+                problems.append(f"断点含 {key} 状态，但当前 {who} 无独立生成器")
+    report["loader_rng"] = "ok"
+
+    # ---- 3) 调度器（有 scheduler 训练时要求断点携带其状态）----
+    # 注意：torch 的 LRScheduler.load_state_dict 会静默接受非法值（如 T_0="bad"），
+    # 因此除副本加载外，还需对照断点记录的“实际调度器参数”（scheduler_effective）
+    if trainer.scheduler is not None:
+        sched_state = checkpoint.get("scheduler_state_dict")
+        if sched_state is None:
+            problems.append(
+                "当前训练使用调度器，但断点缺少 scheduler_state_dict：无法精确恢复 LR 周期"
+            )
         else:
-            failed.append("当前 DataLoader 无 generator，无法恢复 base_seed 序列")
-    return failed
+            try:
+                probe = copy.deepcopy(trainer.scheduler)
+                probe.load_state_dict(sched_state)
+                expected_sched = (
+                    (checkpoint.get("training_protocol") or {}).get("runtime") or {}
+                ).get("scheduler_effective")
+                actual_sched = scheduler_effective_dict(probe)
+                if expected_sched is not None and actual_sched != expected_sched:
+                    problems.append(
+                        "scheduler_state_dict 与断点记录的调度器参数不一致: "
+                        f"{actual_sched} vs {expected_sched}"
+                    )
+                else:
+                    report["scheduler"] = "checked"
+            except Exception as e:
+                problems.append(f"scheduler_state_dict 非法（无法恢复）: {e}")
+    else:
+        report["scheduler"] = "not-used"
+
+    # ---- 4) AMP scaler（启用 AMP 时要求断点携带其状态）----
+    # 同样在副本上加载并对关键值做数值化检查（load_state_dict 不校验坏值）
+    scaler = getattr(trainer, "scaler", None)
+    if scaler is not None:
+        scaler_state = checkpoint.get("scaler_state_dict")
+        if scaler_state is None:
+            problems.append(
+                "当前训练启用 AMP，但断点缺少 scaler_state_dict：无法精确恢复缩放状态"
+            )
+        else:
+            try:
+                probe_scaler = copy.deepcopy(scaler)
+                probe_scaler.load_state_dict(scaler_state)
+                # GradScaler.load_state_dict 为 lazy 语义：加载后 _scale 等实例属性
+                # 仍可能是 None（等首次 update 才初始化）——因此校验来源 state 的值，
+                # 而不是加载后实例的属性。
+                required = ("scale", "growth_factor", "backoff_factor", "growth_interval")
+                missing = [k for k in required if scaler_state.get(k) is None]
+                if missing:
+                    raise ValueError(f"缺少必需数值项 {missing}")
+                float(scaler_state["scale"])
+                float(scaler_state["growth_factor"])
+                float(scaler_state["backoff_factor"])
+                int(scaler_state["growth_interval"])
+                tracker = scaler_state.get("_growth_tracker")
+                if tracker is not None:   # None = 未初始化 tracker（合法，恢复后 lazy 继续）
+                    int(tracker)
+                report["amp_scaler"] = "checked"
+            except Exception as e:
+                problems.append(f"scaler_state_dict 非法（无法恢复）: {e}")
+    else:
+        report["amp_scaler"] = "not-used"
+
+    # ---- 5) 模型结构（键 + 逐键形状；不复制权重）----
+    model_sd = checkpoint.get("model_state_dict")
+    if not isinstance(model_sd, dict):
+        problems.append("model_state_dict 缺失或非 dict")
+    else:
+        current_sd = getattr(trainer.model, "_orig_mod", trainer.model).state_dict()
+        missing = sorted(set(model_sd) - set(current_sd))
+        extra = sorted(set(current_sd) - set(model_sd))
+        if missing or extra:
+            problems.append(
+                f"模型状态键不匹配（断点缺失 {missing[:5]} / 当前多余 {extra[:5]}）"
+            )
+        else:
+            for key in current_sd:
+                cur_v, ck_v = current_sd[key], model_sd[key]
+                if (
+                    isinstance(cur_v, torch.Tensor) and isinstance(ck_v, torch.Tensor)
+                    and tuple(cur_v.shape) != tuple(ck_v.shape)
+                ):
+                    problems.append(
+                        f"模型参数 {key} 形状不匹配: "
+                        f"断点 {tuple(ck_v.shape)} vs 当前 {tuple(cur_v.shape)}"
+                    )
+                    break
+    report["model"] = "checked"
+
+    # ---- 6) 优化器结构（param_groups 数量 + state 张量形状对照参数）----
+    opt_state = checkpoint.get("optimizer_state_dict")
+    if (
+        not isinstance(opt_state, dict)
+        or "param_groups" not in opt_state or "state" not in opt_state
+    ):
+        problems.append("optimizer_state_dict 缺失或结构非法")
+    else:
+        n_cur = len(trainer.optimizer.param_groups)
+        n_ck = len(opt_state["param_groups"])
+        if n_cur != n_ck:
+            problems.append(f"优化器 param_groups 数量不匹配: 断点 {n_ck} vs 当前 {n_cur}")
+        else:
+            flat_params = [p for g in trainer.optimizer.param_groups for p in g["params"]]
+            for pid, st in opt_state["state"].items():
+                if not isinstance(st, dict):
+                    problems.append(f"优化器 state[{pid}] 非 dict")
+                    break
+                bad = False
+                for name, val in st.items():
+                    if (
+                        isinstance(val, torch.Tensor) and val.numel() > 1
+                        and int(pid) < len(flat_params)
+                        and tuple(val.shape) != tuple(flat_params[int(pid)].shape)
+                    ):
+                        problems.append(
+                            f"优化器 state[{pid}].{name} 形状 {tuple(val.shape)} "
+                            f"与参数 {tuple(flat_params[int(pid)].shape)} 不符"
+                        )
+                        bad = True
+                        break
+                if bad:
+                    break
+        report["optimizer"] = "checked"
+
+    if problems:
+        raise RuntimeError(
+            "断点状态完整性预检未通过，恢复被拒绝（未修改任何真实状态）：\n  - "
+            + "\n  - ".join(problems)
+        )
+    return report
 
 
 def _restore_training_state(trainer, checkpoint: dict) -> dict:
@@ -295,10 +499,11 @@ def _restore_training_state(trainer, checkpoint: dict) -> dict:
 
     覆盖 模型/BN、优化器、调度器、AMP scaler、history、训练进度、累计时长、
     best、早停计数、全局 RNG、loader 生成器；并校验恢复后实际调度器参数
-    与断点记录一致（S02）。
+    与断点记录一致（S02）。调用前必须已通过 _verify_checkpoint_state 预检（T03），
+    本函数内任何恢复失败都会直接抛出（不静默降级）。
 
     Returns:
-        {"saved_epoch": int, "rng_failed": list[str]}
+        {"saved_epoch": int}
     """
     # 恢复模型权重（torch.compile 场景同样展开到原始模块）
     try:
@@ -355,15 +560,11 @@ def _restore_training_state(trainer, checkpoint: dict) -> dict:
     trainer.loss_worse_counter = int(es.get("loss_worse_counter", 0))
     trainer.hist_min_val_loss = es.get("hist_min_val_loss")
 
-    # 全局 RNG（python / numpy / torch / cuda）
-    rng_failed: list[str] = []
-    if "rng" in checkpoint:
-        rng_failed = _restore_rng_state(checkpoint["rng"])
-    else:
-        rng_failed = ["断点缺少 RNG 状态"]
+    # 全局 RNG（python / numpy / torch / cuda）：T03 预检已通过，失败即抛出
+    _restore_rng_state(checkpoint["rng"])
 
-    # S01：训练 loader 的独立生成器（批次序列与 worker 种子的复算前提）
-    rng_failed.extend(_restore_loader_rng(trainer.train_loader, checkpoint.get("loader_rng")))
+    # S01/T03：训练 loader 的独立生成器（批次序列与 worker 种子的复算前提）
+    _restore_loader_rng(trainer.train_loader, checkpoint["loader_rng"])
 
     # S02：恢复后实际调度器参数必须与断点记录一致
     expected_scheduler = (
@@ -377,7 +578,7 @@ def _restore_training_state(trainer, checkpoint: dict) -> dict:
                 f"{actual_scheduler} vs {expected_scheduler}"
             )
 
-    return {"saved_epoch": saved_epoch, "rng_failed": rng_failed}
+    return {"saved_epoch": saved_epoch}
 
 
 def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool = False):
@@ -457,9 +658,16 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
     从 checkpoint 恢复完整训练状态（F09 / S01 / S02）。
 
     校验顺序（全部通过后才加载权重/状态；失败不触碰原 run 文件）：
-      格式版本 → model_name/model_spec → 训练协议（完整生效配置 + 数据管线资格）
-      → loader 生成器完整性；随后恢复模型/优化器/调度器/scaler/history/
-      best/早停/RNG/loader 生成器，并校验恢复后实际调度器参数与断点记录一致。
+      格式版本 → [T01: partial 断点自动回滚到同 run 完整 last] →
+      model_name/model_spec → 训练协议（完整生效配置 + 数据管线资格）→
+      [T03: 状态完整性预检（RNG/生成器/调度器/scaler/模型与优化器结构，
+      只读 dry-run，缺项或非法值在修改真实状态前拒绝）]；
+      随后恢复模型/优化器/调度器/scaler/history/best/早停/RNG/loader 生成器，
+      并校验恢复后实际调度器参数与断点记录一致。
+
+    T01：显式加载 partial（epoch 中途）断点时：若同 run 存在完整 last.pth
+    （同 run_id、非 partial）→ 自动回滚到该完整断点并在恢复事件中记录；
+    无完整 last（或 last 亦为 partial / 不同 run）→ 拒绝。
 
     精确恢复支持范围（S01 实测）：
       - workers=0；或 workers>=1 且 persistent_workers=False（独立 generator 复算）
@@ -488,6 +696,38 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             "旧格式断点缺少 RNG / scaler / 早停状态，无法精确续训（不静默降级）。\n"
             f"如确需使用: {checkpoint_path}，请先迁移或从头训练。"
         )
+
+    # ---- T01：显式加载 partial（epoch 中途）断点 → 自动回滚到同 run 完整 last ----
+    fallback_note = None
+    if checkpoint.get("partial"):
+        requested_path = checkpoint_path
+        last_path = checkpoint_path.parent / "last.pth"
+        if not last_path.exists():
+            raise RuntimeError(
+                "该断点为 partial（epoch 中途保存，权重含未完成 epoch 的部分更新）：\n"
+                "  精确恢复被拒绝；且同 run 未找到完整断点 last.pth。\n"
+                f"  请求的断点: {requested_path}\n"
+                "请从头训练，或改用完整 epoch 边界的断点（last.pth / epoch_XXXX.pth）。"
+            )
+        fallback_ckpt = torch.load(last_path, map_location="cpu", weights_only=False)
+        if not isinstance(fallback_ckpt, dict) or "model_state_dict" not in fallback_ckpt:
+            raise RuntimeError(f"同 run 的 last.pth 不是有效 checkpoint: {last_path}")
+        if fallback_ckpt.get("partial"):
+            raise RuntimeError(
+                f"同 run 的 last.pth 也是 partial 断点（{last_path}）：无法自动回滚到完整边界。"
+            )
+        if not checkpoint.get("run_id") or fallback_ckpt.get("run_id") != checkpoint.get("run_id"):
+            raise RuntimeError(
+                "拒绝 partial 回滚：last.pth 与请求断点不是同一 run "
+                f"（{fallback_ckpt.get('run_id')!r} != {checkpoint.get('run_id')!r}）。"
+            )
+        fallback_note = (
+            f"显式加载的 partial 断点（{requested_path.name}，含未完成 epoch 的部分更新）"
+            f"已自动回滚到同 run 完整断点 {last_path.name}"
+        )
+        logger.warning("  - %s", fallback_note)
+        checkpoint_path = last_path
+        checkpoint = fallback_ckpt
 
     # 模型名与规格校验
     ckpt_model_name = checkpoint.get("model_name", "")
@@ -566,18 +806,11 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             f"{checkpoint_path}"
         )
 
-    # ---- 全部校验通过：恢复训练状态（与 S03 自动回滚共享实现）----
-    restore_info = _restore_training_state(trainer, checkpoint)
-    saved_epoch = restore_info["saved_epoch"]
-    rng_failed = restore_info["rng_failed"]
+    # ---- T03：状态完整性预检（只读；缺项/非法值在修改任何真实状态前拒绝）----
+    state_integrity = _verify_checkpoint_state(trainer, checkpoint)
 
-    # partial 标注
-    if checkpoint.get("partial"):
-        logger.warning(
-            "  - 该断点为 epoch 中途的 partial 保存：权重含未完成 epoch 的部分更新，"
-            "history 从最近完整 epoch(=%d) 继续；如需严格一致请从 last.pth 恢复",
-            saved_epoch,
-        )
+    # ---- 全部校验通过：恢复训练状态（与 S03 自动回滚共享实现）----
+    _restore_training_state(trainer, checkpoint)
 
     logger.info("已从 %s 恢复训练:", checkpoint_path)
     logger.info("  - 上次训练到 epoch %s", checkpoint.get("epoch", "?"))
@@ -591,11 +824,13 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
         trainer.acc_patience_counter, trainer.loss_worse_counter,
     )
     logger.info("  - 将从 epoch %d 继续训练", trainer.start_epoch)
-    if rng_failed:
-        logger.warning("  - RNG 恢复不完整: %s（批次顺序可能不一致）", rng_failed)
-
-    # 恢复成功后才写恢复事件（此前任何失败都不会改写原 run 元数据）
-    trainer._record_resume_event(checkpoint_path, protocol_verified=True, notes=[])
+    # 恢复成功后才写恢复事件（此前任何失败都不会改写原 run 元数据）；
+    # T01/T03：协议一致（protocol_verified）与完整状态恢复（state_integrity）分开记录
+    notes = [fallback_note] if fallback_note else []
+    trainer._record_resume_event(
+        checkpoint_path, protocol_verified=True, notes=notes,
+        state_integrity=state_integrity,
+    )
 
     return checkpoint
 

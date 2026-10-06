@@ -193,8 +193,16 @@ def test_dataset_cache_ref_pickle_is_lightweight(mini_cache):
 
 def test_mmap_readonly_and_no_pollution(mini_cache):
     pc, _csv_path, _df, cache_dir = mini_cache
-    x, _y, _rows = pc.split_arrays("Training")
+    x, y, rows = pc.split_arrays("Training")
     assert not x.flags.writeable, "缓存数组应为只读 mmap"
+    assert not y.flags.writeable, "标签数组应只读（T04）"
+    assert not rows.flags.writeable, "行号数组应只读（T04）"
+    with pytest.raises(ValueError):
+        y[0] = 99
+    with pytest.raises(ValueError):
+        rows[0] = 9999
+    with pytest.raises(ValueError):
+        x[0, 0, 0] = 1
 
     ds = FER2013Dataset(cache_ref=(cache_dir, "Training", pc.meta["splits"]["Training"]))
     img, _ = ds[0]
@@ -311,3 +319,111 @@ def test_different_csv_same_cache_dir_rebuilds(tmp_path):
     pc_b = pixel_cache.load_or_build(csv_b, cache_dir, quiet=True)
     assert pc_b.meta["csv_sha256"] != sha_a, "不同 CSV 应触发重建而非复用"
     assert pc_b.meta["csv_sha256"] == pixel_cache.file_sha256_cached(csv_b)
+
+# ============================================================
+# T04 · 完整性边界（stat 签名 / 热命中篡改 / 解析拒绝 / 边界保真）
+# ============================================================
+def test_meta_records_stat_signature(mini_cache):
+    """v2 meta：每个数据文件记录 size/mtime_ns 签名。"""
+    pc, _csv_path, _df, cache_dir = mini_cache
+    for split in ("Training", "PublicTest", "PrivateTest"):
+        for kind in ("x", "y", "rows"):
+            entry = pc.meta["splits"][split][kind]
+            p = cache_dir / entry["file"]
+            assert entry["size"] == p.stat().st_size
+            assert entry["mtime_ns"] == p.stat().st_mtime_ns
+
+
+def test_hot_hit_detects_tampered_file(mini_cache):
+    """热命中（进程内已打开）后磁盘文件被改写 → stat 不符 → 重建，数据恢复一致。"""
+    import time
+
+    pc, csv_path, _df, cache_dir = mini_cache
+    x, _y, _rows = pc.split_arrays("Training")     # 建立进程内缓存
+    x_ref = np.asarray(x[:])
+
+    time.sleep(0.01)
+    entry = pc.meta["splits"]["Training"]["y"]
+    ypath = cache_dir / entry["file"]
+    raw = bytearray(ypath.read_bytes())
+    raw[128] ^= 0xFF                                # 数据区坏一个字节（同长度）
+    ypath.write_bytes(bytes(raw))
+
+    x2, _y2, _rows2 = pc.split_arrays("Training")   # 热命中路径 → stat 检测 → 重建
+    assert np.array_equal(np.asarray(x2[:]), x_ref), "重建后数据应与源一致"
+    assert pixel_cache.file_sha256_cached(ypath) == pc.meta["splits"]["Training"]["y"]["sha256"]
+
+
+def test_worker_side_stat_check_rejects(mini_cache):
+    """worker 侧 get_memmap_split：数据源变化 → 明确拒绝（不返回被替换的数据）。"""
+    import time
+
+    pc, _csv_path, _df, cache_dir = mini_cache
+    entry = pc.meta["splits"]["Training"]
+    pixel_cache.get_memmap_split((cache_dir, "Training", entry))   # 先打开
+    time.sleep(0.01)
+    p = cache_dir / entry["rows"]["file"]
+    raw = bytearray(p.read_bytes())
+    raw[96] ^= 0xFF
+    p.write_bytes(bytes(raw))
+    with pytest.raises(pixel_cache.PixelCacheCorruptedError, match="stat|拒绝"):
+        pixel_cache.get_memmap_split((cache_dir, "Training", entry))
+
+
+@pytest.mark.parametrize("case", ["over", "negative", "float", "count"])
+def test_parse_rejects_invalid_values(tmp_path, case):
+    """非法像素值明确失败（256 / 负数 / 非整数 / 数量不对），不再静默截断。"""
+    base = ["1"] * 2304
+    if case == "over":
+        base[0] = "256"
+    elif case == "negative":
+        base[0] = "-1"
+    elif case == "float":
+        base[0] = "1.5"
+    elif case == "count":
+        base = base[:-1]
+    csv_path = tmp_path / f"{case}.csv"
+    pd.DataFrame([{
+        "emotion": 0, "pixels": " ".join(base), "Usage": "Training",
+    }]).to_csv(csv_path, index=False)
+    with pytest.raises(ValueError):
+        pixel_cache.build_cache(csv_path, tmp_path / f"{case}_cache", quiet=True)
+
+
+def test_parse_boundary_values_bit_exact():
+    """合法边界值 0/255 逐位保真，且与旧 float32 路径一致。"""
+    s = " ".join(["0"] * 1152 + ["255"] * 1152)
+    arr = pixel_cache.parse_pixels_column(np.array([s, s]))
+    assert arr.dtype == np.uint8
+    assert int(arr[0, 0, 0]) == 0 and int(arr[0, -1, -1]) == 255
+    legacy = np.array(s.split(), dtype=np.float32).reshape(48, 48) / 255.0
+    assert np.array_equal(arr[0].astype(np.float32) / 255.0, legacy)
+
+def test_cold_deleted_file_rebuilds(mini_cache):
+    """冷状态下数据文件被删除 → 缺失检测 → 重建（T04）。"""
+    pc, csv_path, _df, cache_dir = mini_cache
+    (cache_dir / pc.meta["splits"]["PublicTest"]["y"]["file"]).unlink()
+
+    pc2 = pixel_cache.load_or_build(csv_path, cache_dir, quiet=True)
+    _x, y, _rows = pc2.split_arrays("PublicTest")   # 触发重建
+    assert len(y) == 6
+    assert (cache_dir / pc2.meta["splits"]["PublicTest"]["y"]["file"]).exists()
+
+
+def test_hot_replaced_file_rebuilds(mini_cache):
+    """热状态下数据文件被整体替换（新 stat）→ 重建（T04）。"""
+    import time
+
+    pc, csv_path, _df, cache_dir = mini_cache
+    pc.split_arrays("Training")
+    time.sleep(0.01)
+    entry = pc.meta["splits"]["Training"]["y"]
+    ypath = cache_dir / entry["file"]
+    raw = bytearray(ypath.read_bytes())
+    raw[130] ^= 0x01          # 修改内容（mtime 与内容同时变化）
+    ypath.write_bytes(bytes(raw))
+
+    pc2 = pixel_cache.load_or_build(csv_path, cache_dir, quiet=True)
+    x2, y2, _rows = pc2.split_arrays("Training")
+    sub = _df[_df["Usage"] == "Training"]
+    assert np.array_equal(y2, sub["emotion"].to_numpy(dtype=np.int64)), "重建后标签应与源一致"

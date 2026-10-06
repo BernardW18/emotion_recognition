@@ -219,3 +219,27 @@ def test_does_not_mutate_input_and_stays_finite():
     assert torch.equal(x, x_copy), "增强不得就地修改输入张量"
     assert out.shape == x.shape
     assert torch.isfinite(out).all()
+
+# ============================================================
+# T05 · 行为回归：输出分布与 legacy 不同（不得宣称"同分布"）
+# ============================================================
+def test_binary_image_output_distribution_differs_from_legacy():
+    """16 张二值图仅开旋转：legacy（nearest）输出仍为纯 0/1；
+    batched（双线性）产生大量小数像素——输出分布不同（审核 T05 反例固化为回归）。"""
+    from torchvision.transforms.functional import rotate as tf_rotate
+
+    g = torch.Generator().manual_seed(0)
+    x = (torch.rand(16, 1, 48, 48, generator=g) > 0.5).float()
+
+    legacy = torch.stack([tf_rotate(img, 15.0) for img in x])
+    legacy_frac = int(((legacy > 0) & (legacy < 1)).sum())
+
+    batched = affine_batch(
+        x, torch.full((16,), 15.0), torch.zeros(16), torch.zeros(16)
+    )
+    batched_frac = int(((batched > 0) & (batched < 1)).sum())
+
+    assert legacy_frac == 0, f"legacy（nearest）二值图旋转后应仍为纯 0/1（实际 {legacy_frac}）"
+    assert batched_frac > 1000, (
+        f"batched（双线性）应产生大量小数像素（实际 {batched_frac}）——输出分布不同"
+    )

@@ -4,12 +4,17 @@ FER2013 像素缓存（PB02）— 从冻结 CSV 生成可验证的紧凑 uint8 �
 设计要点：
   - 内容：三官方划分的 (N,48,48) uint8 像素、int64 标签、int64 原行号（CSV 数据行序 0 基）。
     加载时按需转换为 float32（x/255），与旧逐行解析路径逐位一致（uint8→float32 精确）。
-  - 校验：缓存键 = CACHE_VERSION + CSV SHA-256；每个数据文件记录 SHA-256、shape、dtype。
-    meta 是唯一权威代际标记（最后原子提交）；文件写入用 tmp + os.replace，
-    目标被占用（Windows mmap 锁）时自动轮转文件名并在 meta 中记录实际文件名。
-  - 加载：mmap 只读数组（多进程共享 OS page cache，spawn 时不复制数据本体；
-    进程内按 (cache_dir, split) 惰性打开，不随 dataset pickle 传递）。
+  - 校验（v2 / T04）：缓存键 = CACHE_VERSION + CSV SHA-256；每个数据文件记录
+    SHA-256、shape、dtype 与 stat 签名（size/mtime_ns）。meta 是唯一权威代际标记
+    （最后原子提交）；文件写入用 tmp + os.replace，目标被占用（Windows mmap 锁）
+    时自动轮转文件名并在 meta 中记录实际文件名。
+  - 加载：三份数组均为只读（x 为只读 mmap，y/rows 加载后置 write=False）；
+    进程内按 (cache_dir, split) 惰性打开，多进程共享 page cache、不随 pickle 传递。
+    热命中与 worker 侧打开均做 stat 签名快查（数据源变化 → 完整校验/重建，
+    训练中的 worker 侧明确拒绝继续）；SHA-256 仅在非热命中路径全量计算。
   - 失配/损坏：明确重建（损坏文件触发重建并在重建后重新校验）；损坏负例必失效。
+  - 解析（T04）：像素先以 float64 校验（数量 / 整数性 / 0–255 值域）再转 uint8；
+    非法值明确失败（不做静默截断）；标签校验合法域 0–6。
   - 该缓存只是可重建派生物，不替代原 CSV、不改原行号；位于忽略目录（data/cache/）。
 
 用法：
@@ -47,9 +52,10 @@ __all__ = [
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-CACHE_VERSION = "uint8-v1"
+CACHE_VERSION = "uint8-v2"   # v2（T04）：meta 绑定每文件 stat 签名（size/mtime_ns）
 OFFICIAL_SPLITS = ("Training", "PublicTest", "PrivateTest")
 PIXEL_SHAPE = (48, 48)
+_NUM_CLASSES = 7   # FER2013 官方 7 类（标签合法值 0–6）
 PIXELS_PER_IMAGE = PIXEL_SHAPE[0] * PIXEL_SHAPE[1]
 
 
@@ -95,20 +101,32 @@ def parse_pixels_column(pixel_strings) -> np.ndarray:
     """
     将像素字符串序列解析为 (N, 48, 48) uint8 数组。
 
-    采用 np.fromstring(sep=' ') 逐行解析（本机实测比 str.split 快约 35%、无警告、
-    与 str.split 路径逐位一致）；像素数量不为 2304 的行明确报错（带行位置）。
-    与旧 float32 路径的关系：uint8 值 → float32 精确表示，除以 255.0 后逐位一致。
+    T04：先以 float32 解析并按行校验（数量 / 整数性 / 0–255 值域），任何非法值
+    明确报错（带行位置），再转换为 uint8——避免"256 静默截断为 0"类错误。
+    与旧 float32 路径的关系：合法值 0–255 → uint8 → float32 精确表示，
+    除以 255.0 后逐位一致。
     """
     n = len(pixel_strings)
     out = np.empty((n, *PIXEL_SHAPE), dtype=np.uint8)
     for i, s in enumerate(pixel_strings):
-        vals = np.fromstring(s, dtype=np.uint8, sep=" ")
+        vals = np.fromstring(s, dtype=np.float32, sep=" ")
         if vals.shape != (PIXELS_PER_IMAGE,):
             raise ValueError(
                 f"像素解析失败：第 {i} 行得到 {vals.shape[0] if vals.ndim else '?'} 个值"
                 f"（期望 {PIXELS_PER_IMAGE}）"
             )
-        out[i] = vals.reshape(PIXEL_SHAPE)
+        non_int = vals != np.floor(vals)
+        if bool(np.any(non_int)):
+            bad = int(np.argmax(non_int))
+            raise ValueError(
+                f"像素解析失败：第 {i} 行第 {bad} 个值不是整数（{vals[bad]!r}）"
+            )
+        vmin, vmax = float(vals.min()), float(vals.max())
+        if vmin < 0.0 or vmax > 255.0:
+            raise ValueError(
+                f"像素解析失败：第 {i} 行存在超出 0–255 的值（min={vmin}, max={vmax}）"
+            )
+        out[i] = vals.reshape(PIXEL_SHAPE).astype(np.uint8)
     return out
 
 
@@ -120,6 +138,11 @@ def _parse_split_dataframe(df: pd.DataFrame, split: str) -> dict:
     sub = df.loc[mask]
     x = parse_pixels_column(sub["pixels"].values)
     y = sub["emotion"].to_numpy(dtype=np.int64)
+    if y.size and (int(y.min()) < 0 or int(y.max()) >= _NUM_CLASSES):
+        raise ValueError(
+            f"划分 {split} 含非法标签（期望 0–{_NUM_CLASSES - 1}，"
+            f"实际 {int(y.min())}–{int(y.max())}），拒绝构建缓存"
+        )
     rows = sub.index.to_numpy(dtype=np.int64)
     return {"x": x, "y": y, "rows": rows}
 
@@ -158,9 +181,13 @@ def _write_split_files(cache_dir: Path, split: str, data: dict) -> dict:
         with open(tmp, "wb") as f:
             np.save(f, arr)
         actual_name = _replace_or_rotate(tmp, final)
+        st = (cache_dir / actual_name).stat()
         out[kind] = {
             "file": actual_name,
             "sha256": file_sha256_cached(cache_dir / actual_name),
+            # T04：stat 签名（热命中的廉价完整性检查；替换/改写会改变 size/mtime_ns）
+            "size": int(st.st_size),
+            "mtime_ns": int(st.st_mtime_ns),
             "shape": list(arr.shape),
             "dtype": str(arr.dtype),
         }
@@ -248,6 +275,24 @@ def build_cache(csv_path, cache_dir=None, *, quiet: bool = False) -> dict:
 _MMAP_CACHE: dict[tuple[str, str], dict] = {}
 
 
+def _stat_signature_matches(path: Path, entry_kind: dict) -> bool:
+    """
+    T04 廉价完整性检查：文件 size/mtime_ns 与 meta 记录一致。
+
+    - v2 缓存必含签名；缺签名记录（异常情形）视作不匹配（转完整 SHA/重建路径）
+    - 文件缺失/不可 stat → False
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    if "size" not in entry_kind or "mtime_ns" not in entry_kind:
+        return False
+    return bool(
+        st.st_size == entry_kind["size"] and st.st_mtime_ns == entry_kind["mtime_ns"]
+    )
+
+
 def _close_cached_mmaps(cache_dir: Path) -> None:
     """关闭并移除该缓存目录的进程内 mmap 引用（重建前调用；Windows 文件锁友好）。"""
     keys = [k for k in _MMAP_CACHE if k[0] == str(cache_dir)]
@@ -304,6 +349,11 @@ class PixelCache:
             p = self.cache_dir / entry[kind]["file"]
             if not p.exists():
                 raise PixelCacheCorruptedError(f"缓存文件缺失: {p.name}")
+            # T04：先做 stat 签名快查（已被替换/改写 → 直接重建，不必先算 SHA）
+            if not _stat_signature_matches(p, entry[kind]):
+                raise PixelCacheCorruptedError(
+                    f"缓存文件 stat 签名不符（已被替换或修改）: {p.name}"
+                )
             if file_sha256_cached(p) != entry[kind]["sha256"]:
                 raise PixelCacheCorruptedError(f"缓存文件 SHA-256 不符（已损坏）: {p.name}")
             paths[kind] = p
@@ -311,6 +361,9 @@ class PixelCache:
         x = np.load(paths["x"], mmap_mode="r")
         y = np.load(paths["y"])
         rows = np.load(paths["rows"])
+        # T04：y/rows 一律只读（防止就地写入污染进程内共享缓存）
+        y.setflags(write=False)
+        rows.setflags(write=False)
         exp = {k: entry[k] for k in ("x", "y", "rows")}
         if tuple(x.shape) != tuple(exp["x"]["shape"]) or str(x.dtype) != exp["x"]["dtype"]:
             raise PixelCacheCorruptedError(
@@ -342,7 +395,15 @@ class PixelCache:
         key = (str(self.cache_dir), split)
         cached = _MMAP_CACHE.get(key)
         if cached is not None and cached["file_x"] == self.meta["splits"][split]["x"]["file"]:
-            return cached["x"], cached["y"], cached["rows"]
+            # T04：热命中同样做三份文件的 stat 签名快查；变化则放弃引用并走完整校验/重建
+            entry = self.meta["splits"][split]
+            if all(
+                _stat_signature_matches(self.cache_dir / entry[k]["file"], entry[k])
+                for k in ("x", "y", "rows")
+            ):
+                return cached["x"], cached["y"], cached["rows"]
+            _MMAP_CACHE.pop(key, None)
+            gc.collect()
         try:
             x, y, rows = self._load_split_checked(split)
         except PixelCacheCorruptedError as e:
@@ -375,9 +436,22 @@ def get_memmap_split(cache_ref) -> tuple:
     key = (str(cache_dir), str(split))
     hit = _MMAP_CACHE.get(key)
     if hit is not None and hit["file_x"] == entry["x"]["file"]:
-        return hit["x"], hit["y"], hit["rows"]
+        # T04：命中同样做 stat 签名快查（数据源变化 → 拒绝继续，避免读到被替换的数据）
+        if all(_stat_signature_matches(Path(cache_dir) / entry[k]["file"], entry[k])
+               for k in ("x", "y", "rows")):
+            return hit["x"], hit["y"], hit["rows"]
+        _MMAP_CACHE.pop(key, None)
+        gc.collect()
 
     p = Path(cache_dir)
+    for kind in ("x", "y", "rows"):
+        fp = p / entry[kind]["file"]
+        if not fp.exists():
+            raise PixelCacheCorruptedError(f"缓存文件缺失（worker 侧）: {fp.name}")
+        if not _stat_signature_matches(fp, entry[kind]):
+            raise PixelCacheCorruptedError(
+                f"缓存文件 stat 签名不符（数据源已变化，拒绝继续使用）: {fp.name}"
+            )
     try:
         x = np.load(p / entry["x"]["file"], mmap_mode="r")
         y = np.load(p / entry["y"]["file"])
@@ -391,6 +465,9 @@ def get_memmap_split(cache_ref) -> tuple:
         )
     if tuple(y.shape) != tuple(entry["y"]["shape"]) or str(y.dtype) != entry["y"]["dtype"]:
         raise PixelCacheCorruptedError(f"缓存标签 shape/dtype 异常: {y.shape}/{y.dtype}")
+    # T04：y/rows 一律只读
+    y.setflags(write=False)
+    rows.setflags(write=False)
     _MMAP_CACHE[key] = {
         "file_x": entry["x"]["file"], "x": x, "y": y, "rows": rows,
     }

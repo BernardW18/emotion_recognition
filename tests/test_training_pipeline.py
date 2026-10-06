@@ -422,6 +422,24 @@ def test_resume_matches_continuous_batched_augmentation(tmp_path, workers):
         assert torch.allclose(p_a, p_b, atol=1e-6, rtol=1e-5)
 
 
+def test_resume_rejects_aug_version_change(tmp_path):
+    """T05：批级增强实现版本变化 → 协议比对拒绝精确续训（版本随快照记录）。"""
+    t, _ = _resume_env(tmp_path, "augv", batched_augmentation=True)
+    path = t.checkpoints_dir / "last.pth"
+    t.save_checkpoint(path)
+
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    entry = ckpt["training_protocol"]["runtime"]["batch_augmentation_effective"]
+    assert entry["version"] == "batched-v1"
+    entry["version"] = "batched-v0"
+    tampered = t.checkpoints_dir / "tampered_version.pth"
+    torch.save(ckpt, tampered)
+
+    t2, _ = _resume_env(tmp_path, "augv2", batched_augmentation=True)
+    with pytest.raises(RuntimeError, match="version"):
+        t2.load_checkpoint(tampered)
+
+
 def test_trainer_rejects_batched_impl_with_dataset_transform(tmp_path):
     """PB01：impl=batched 且数据集仍带逐样本 transform → 拒绝（防双重增强）。"""
     from torchvision import transforms
@@ -1114,6 +1132,18 @@ def test_baseline_config_is_valid():
     assert cfg["training"]["loss_type"] == "cross_entropy"
     assert cfg["dataloader"]["class_balanced_sampling"] is False
     assert cfg["augmentation"]["class_specific"]["enabled"] is False
+
+
+def test_default_configs_require_exact_resume_capability():
+    """T02：主/基线配置必须 non-persistent 且 workers=0（默认断点可精确续训）。"""
+    from training.trainer import load_config as _load_config
+
+    main = _load_config()
+    base = _load_config(str(PROJECT_ROOT / "configs" / "baseline_config.yaml"))
+    for name, cfg in (("training_config.yaml", main), ("baseline_config.yaml", base)):
+        dl = cfg["dataloader"]
+        assert dl["persistent_workers"] is False, f"{name}: persistent_workers 必须 false（T02）"
+        assert int(dl["num_workers"]) == 0, f"{name}: 默认 num_workers 应为 0（T02 测量结论）"
 
 
 def test_baseline_config_differs_only_in_three_fields():

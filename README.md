@@ -29,12 +29,18 @@
   恢复前整表比对，任何影响训练状态的配置/数据变化都会被拒绝（换策略请新建 run）；
   **精确恢复（与连续训练逐批一致）支持 `workers=0` 或 `workers≥1` 且
   `persistent_workers=false`**（独立 generator 复算批次序列与 worker 种子），
-  `persistent_workers=true` 明确拒绝；中断后同实例继续会自动回滚到完整 last。
-- **性能（PB01–PB05）**：批级张量增强（`augmentation.impl`，同分布实测提速
+  `persistent_workers=true` 明确拒绝；中断后同实例继续会自动回滚到完整 last；
+  **显式加载 partial 断点同样自动回滚**（无同 run 完整 last 则拒绝，T01）。
+- **run 用途与正式准入（T06）**：`train.py --purpose smoke|formal`（默认 smoke）；
+  正式实验要求冻结协议文件（`docs/comparison_protocol_frozen.json`）存在并绑定入
+  run_meta（id + 文件 SHA-256）；来源绑定（run-bound）≠ 正式资格，
+  正式准入由 `utils.comparison_check.check_formal_eligibility` 独立判定
+  （用途声明 + 冻结绑定一致 + 正常结束 + 完整断点 + 数据指纹）。
+- **性能（PB01–PB05）**：批级张量增强（`augmentation.impl`，独立实现，作者短程流程测量提速
   88.4%（workers=0）/ 39.0%（workers=4））；uint8 像素缓存（工厂加载 8.7→0.24s，逐位一致）；
   评估快速路径（完整评估 -96.0%）；Grad-CAM 按需 + 缓存（命中 -92.6%~-95.5%）；
   fused Adam 为可选项（默认关，实测 ~4.9–5.2%）。
-- **质量门槛**：pytest（197 项）+ ruff + mypy（全项目 42 个源文件 0 错误）全部通过。
+- **质量门槛**：pytest（233 项）+ ruff + mypy（全项目 43 个源文件 0 错误）全部通过。
 
 ---
 
@@ -88,7 +94,7 @@ emotion_recognition/
 │   └── confusion_matrices/  roc_curves/  training_curves/
 ├── docs/
 │   └── data_audit.md            # 数据重复披露与去重协议草案
-├── tests/                       # 测试（197 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused）
+├── tests/                       # 测试（233 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
 ├── pyproject.toml               # 项目配置 + ruff + mypy
 ├── requirements.txt             # 依赖安装入口（CUDA 组合）
 └── README.md
@@ -149,6 +155,8 @@ Checkpoint 选择器（列出 `training/runs/` 下的可续训断点）。
 - **开始**：运行 CLI 命令或训练 Notebook Cell。
 - **暂停**：`Ctrl+C` / Jupyter 停止按钮——保存 `interrupted_*` 断点（`partial` 标记）。
 - **继续**：`--resume auto`（最新完整 `last.pth`）或指定断点路径。
+  当前主/基线配置默认 persistent workers，不能精确续训（T02）；训练前需改为非持久模式。
+  只选择完整 last/best 断点；显式 interrupted 断点有 T01 的额外更新问题，尚待修复。
 - **停止**：早停自动触发（原因记录在 run 元数据与输出）。
 - **产物**：`training/runs/<模型>/<run_id>/`：`config_effective.yaml`、`run_meta.json`
   （CLI 参数 / seed / git / 环境 / 数据指纹 / 状态 / 恢复事件）、`history.json`、
@@ -158,7 +166,7 @@ Checkpoint 选择器（列出 `training/runs/` 下的可续训断点）。
   其状态随断点保存/恢复，批次序列与 worker 种子可复算——回归覆盖普通/增强/
   加权采样组合）。`persistent_workers=true` 不提供精确恢复（启动时提示、加载时拒绝）。
   恢复端的数据管线规格（workers/persistent/sampler/batch）必须与断点一致；
-  训练协议（完整生效配置 + 数据指纹）任一变化都会被拒绝。
+  训练协议（完整生效配置 + 数据指纹）任一变化都会被拒绝；状态缺项保护仍待 T03 补齐。
 
 ### 4. 评估
 
@@ -279,7 +287,7 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 | 早停 | val_acc 无改善 + val_loss 恶化双监控（=0 禁用） |
 | Checkpoint | save_best / monitor_metric(val_acc/val_loss) / 定期断点清理 |
 | 确定性 | cudnn_deterministic（由配置决定，代码不再强制覆盖） |
-| 增强实现 | `augmentation.impl`：legacy（逐样本）/ **batched（批级张量，默认）**；同分布，随机序列不同 |
+| 增强实现 | `augmentation.impl`：legacy（逐样本）/ **batched（批级张量，默认）**；输出分布与 legacy 不同，按独立版本记录 |
 | fused Adam | `training.optimizer_fused`（仅 CUDA + Adam；默认关，为可选项） |
 
 ---
@@ -291,16 +299,23 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 - **数据分析**: Jupyter Notebook + Pandas + Matplotlib + Seaborn
 - **评估**: scikit-learn（混淆矩阵 / ROC / 分类报告）+ 自实现 ECE/NLL
 - **可解释性**: Grad-CAM 热力图（纯手写，无第三方依赖）
-- **质量保证**: pytest（197 项通过）+ ruff（通过）+ mypy（全项目 42 源文件 0 错误）
+- **质量保证**: pytest（233 项通过）+ ruff（通过）+ mypy（全项目 43 源文件 0 错误）
 
 ## 项目状态与限制
 
-- 本轮（2026-10）为**修复、整理与性能优化轮**：统一评估 + 工程修复 + 续训可靠性
-  返修（S01–S05）与性能专项（PB01–PB05）均已实施并验收，实测数字与边界见
-  [PROJECT_REVIEW.md](PROJECT_REVIEW.md)（如批级增强为同分布实现、非逐位等价）；
-  **未进行正式重训**，上表数字来自历史权重（legacy，信息不全，已有明确标注与迁移说明）。
-- 性能摘要：工厂加载 8.7→0.24s、批级增强 88.4%/39.0%（w0/w4）、完整评估 -96.0%、
-  Grad-CAM 命中 -92.6%~-95.5%；fused Adam 未达稳定 ≥5% 目标，保留为可选项（默认 false）。
+- 第三轮独立审核（2026-10-07，基准 b75d8e3）的 T01–T06 问题（续训完整性、缓存边界、
+  增强语义、正式实验准入）**已由第五轮修复完成并验收**，详见
+  [PROJECT_REVIEW.md](PROJECT_REVIEW.md)。批级增强与 legacy 的输出分布不同，按独立
+  实现记录。**未进行正式重训**，上表来自历史权重。
+- 第五轮修复摘要：partial 显式加载自动回滚（无同 run 完整 last 则拒绝）；默认配置
+  `workers=0` 且 non-persistent（0/2/4 配对测量选定）；恢复前状态完整性预检
+  （缺项/非法值在改动前拒绝）；缓存 v2（stat 签名/三数组只读/解析校验）；
+  增强语义冻结至 batched-v1（不再声称"同分布"）；run 用途与正式准入分离
+  （`--purpose smoke|formal` + 冻结协议绑定；当前全部 run 均判定"非正式"）。
+  质量门槛：233 项测试 + ruff + mypy（43 文件）全绿。
+- 本轮独立实测：CPU 128 张增强 56.36→1.83ms；完整 PublicTest 的 GPU **预测阶段**
+  三模型耗时减少 95.1% / 79.0% / 87.5%，同设备新旧概率最大差 0。此前完整流程数字为作者
+  短程执行记录，本轮没有重复长期训练或浏览器端到端测量；fused Adam 继续默认关闭。
 - `training/checkpoints/`、`training/logs/` 为 legacy 历史产物（只读保留），
   新训练一律写入 `training/runs/`。
 - 2026-10-07 完成三次**流程验证短训练**（mini_cnn：`20261007_022921_seed42`、

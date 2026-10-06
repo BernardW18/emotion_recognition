@@ -60,6 +60,7 @@ from training.checkpoint import (
     _format_duration,
     _restore_rng_state,
     _restore_training_state,
+    _verify_checkpoint_state,
     collect_environment_info,
     collect_git_info,
     read_run_meta,
@@ -342,6 +343,8 @@ class Trainer:
         class_counts: list | None = None,
         run_dir: str | Path | None = None,
         run_meta_extra: dict | None = None,
+        run_purpose: str = "unspecified",
+        frozen_protocol: dict | None = None,
     ):
         # ---- 配置集中校验（R07）：在任何模型移动 / run 写入之前执行 ----
         validate_config(config, model_name=model_name)
@@ -548,6 +551,10 @@ class Trainer:
         # ---- run_meta（F05/R02）：仅新 run 在构造时落盘；已存在的 run 在恢复校验
         #      通过之前不改写任何文件（失败不得先改写原 run 元数据） ----
         self._run_meta_extra = run_meta_extra or {}
+        # T06：run 用途声明与冻结协议绑定（train.py --purpose formal 时提供；
+        # 默认 unspecified/smoke 均为非正式，正式实验准入由 check_formal_eligibility 判定）
+        self.run_purpose = str(run_purpose or "unspecified")
+        self.frozen_protocol = dict(frozen_protocol) if frozen_protocol else None
         existing_meta = read_run_meta(self.run_dir)
         if existing_meta is None:
             self.run_meta = self._build_run_meta(run_meta_extra)
@@ -574,6 +581,8 @@ class Trainer:
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
             "seed": self.config["seed"],
+            "run_purpose": self.run_purpose,
+            "frozen_protocol": self.frozen_protocol,
             "model_spec": self.model_spec.to_dict(),
             "class_counts": self.class_counts,
             "git": collect_git_info(),
@@ -673,13 +682,16 @@ class Trainer:
         }
 
     def _record_resume_event(self, checkpoint_path, *, protocol_verified: bool,
-                             notes: list | None = None) -> None:
-        """恢复成功后记录事件（R02）：含当次 CLI/git/环境与生效配置摘要。"""
+                             notes: list | None = None,
+                             state_integrity: dict | None = None) -> None:
+        """恢复成功后记录事件（R02/T01/T03）：含当次 CLI/git/环境与生效配置摘要；
+        协议一致（protocol_verified）与完整状态恢复（state_integrity 预检摘要）分开记录。"""
         event = {
             "resumed_at": datetime.now().isoformat(),
             "checkpoint": str(checkpoint_path),
             "checkpoint_sha256": file_sha256(checkpoint_path),
             "protocol_verified": protocol_verified,
+            "state_integrity": dict(state_integrity or {}),
             "notes": list(notes or []),
             "cli_args": self._run_meta_extra.get("cli_args"),
             "resume_conditions": self._run_meta_extra.get("resume_conditions"),
@@ -739,6 +751,8 @@ class Trainer:
                 "不要沿用含部分更新的实例。"
             )
         checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
+        # T03：与显式恢复同一完整性门槛（预检只读；失败即拒绝，不进入半恢复状态）
+        _verify_checkpoint_state(self, checkpoint)
         _restore_training_state(self, checkpoint)
         self.optimizer.zero_grad(set_to_none=True)
         self._partial_state = False

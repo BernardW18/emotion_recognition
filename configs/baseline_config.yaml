@@ -23,9 +23,10 @@ data:
 
 # 数据加载性能配置
 dataloader:
-  num_workers: 4
+  # T02：与主配置一致：non-persistent、workers=0（测量结论，精确续训支持）
+  num_workers: 0
   pin_memory: true
-  persistent_workers: true
+  persistent_workers: false
   prefetch_factor: 6
   class_balanced_sampling: false   # 【与主配置差异 2】普通随机采样（基线臂）
 
