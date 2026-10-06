@@ -1,12 +1,16 @@
-# 模型比较协议（草案 comparison-v2）— 未冻结
+# 模型比较协议（comparison-v2）— CE 第一阶段已冻结
 
-**状态：草案。** 正式重训前必须评审并**冻结**（记录冻结日期与 git commit）；冻结后
-不得根据 PrivateTest 结果调整方案。本文件为"先冻结方案、再启动重训"提供预注册口径。
+**当前状态：CE 第一阶段已冻结，正式训练尚未执行。** 用户确认第一阶段仅执行三个模型的
+A 臂（普通 CE 基线），实际清单为 [comparison_protocol_frozen.json](comparison_protocol_frozen.json)，
+协议 id 为 `comparison-ce-v1`，冻结日期 2026-10-07，代码基准
+`485a2782b3eed934c5c61ca68b978c8d370986a5`。每模型 seeds=42/43/44，共9次独立训练。
+B/C/D/E 与 AMP ON/OFF 比较仍是后续草案，不属于本次冻结范围；不能据第一阶段结果宣称其已完成。
+冻结后不得根据 PrivateTest 结果调整方案。
 
 **版本记录**：v1（初稿）→ v2（2026-10-07，按第二轮审核 R08 更新：新增 CE 基线臂、
 选定"固定共同方案"预算口径并写入统一超参数值）→ v2.1（2026-10-07，性能轮 PB01–PB05
 完成后更新：增强实现统一为 batched；optimizer_fused 保持默认 false）。
-预算表数值已选定，冻结仍需用户评审。
+预算表数值已选定；CE 第一阶段已获用户确认并冻结，其余比较臂尚未冻结。
 
 ## 1. 范围与目标
 
@@ -33,8 +37,9 @@
 
 ### 3.1 预算口径：固定共同方案（已选定）
 
-三个模型使用**完全相同的训练超参**，差异只来自架构本身。正式比较执行时，
-把 `configs/training_config.yaml` 的三个模型段统一为：
+三个模型采用共同的优化/训练预算，模型定义保留现有 activation/dropout 差异，
+以冻结清单中的 `model_spec` 为准，因此不能声称仅改变了网络拓扑。
+CE 第一阶段使用 `configs/baseline_config.yaml`；共同训练设置为：
 
 | 维度 | 统一值 |
 |---|---|
@@ -49,8 +54,8 @@
 | 增强 | 常规图像增强开启（统一）；类别专属增强与采样开关按"臂"定义（见 3.2） |
 
 > 执行说明：**已于 2026-10-07 应用**——`configs/training_config.yaml` 与
-> `configs/baseline_config.yaml` 的三个模型段已统一为上述值（差异只来自架构本身；
-> 防漂移测试覆盖）。冻结日期 + commit 待正式重训提交前登记；冻结后不得改动。
+> `configs/baseline_config.yaml` 的三个模型段已统一为上述预算值（防漂移测试覆盖）。
+> CE 第一阶段的冻结日期和 commit 已登记于实际清单；冻结后不得改动绑定源码/配置。
 > 历史各模型的差异化超参（mini 5e-4/256/30 等）不再用于正式比较。
 > **增强实现（2026-10-07 追加）**：正式比较统一使用 `augmentation.impl="batched"`
 > （batched-v1；部分参数范围/门控沿用，输出分布与 legacy 不同；批种子规则
@@ -59,7 +64,7 @@
 > 正式冻结须写明具体变换规则；实际实现/模型/臂保持统一，切换实现需新建 run（T05）。
 > 第四轮独立审核（6610651）：主/基线已默认 workers=0、persistent_workers=false，T02 通过。
 > U01/U02已通过v3状态与事务回滚验收，PB06批级保护取数已实施。
-> U03准入校验已补齐实际清单和真实产物；正式冻结/多seed实验仍未执行。
+> U03准入校验已补齐实际清单和真实产物；CE 第一阶段现已冻结，多seed正式实验仍未执行。
 > **fused Adam**：`optimizer_fused` 保持默认 false——PB03 实测完整流程中位改善
 > ~4.9–5.2%（两轮 9 组配对），未稳定达到 ≥5% 判据，保留为可选项。
 
@@ -104,7 +109,7 @@
 - 若实施附加去重协议（`dedup-v1`），其重训结果**单独命名与报告**，
   不与官方协议结果混排（见 docs/data_audit.md §3）。
 
-## 6. 冻结流程（U03 实现已验收，正式方案仍未冻结）
+## 6. 冻结流程（U03 实现已验收，CE 第一阶段已冻结）
 
 1. 评审第3节的预算与各臂，将实际实现/配置定稿提交；运行新增的
    tools/freeze_comparison.py --plan MODEL ARM CONFIG（可重复）--seeds 42 43 44
@@ -128,5 +133,42 @@
 
     .\.venv\Scripts\python.exe tools/freeze_comparison.py --protocol-id comparison-v2-frozen1 --output docs/comparison_protocol_frozen.json --seeds 42 43 44 --plan mini_cnn A configs/baseline_config.yaml --plan vgg_lite A configs/baseline_config.yaml --plan micro_resnet A configs/baseline_config.yaml
 
-当前本协议保持“草案未冻结/正式实验未执行”；本次只用临时冻结清单与真实七分类
-MiniCNN小数据产物测试准入，没有创建实际冻结文件或进行正式重训。
+上面的命令为生成流程示例，不要重新执行或覆盖已创建的 CE 清单。当前第一阶段的
+实际冻结与启动方法见下节；其他臂仍是草案，后续需独立定稿并处理新的协议绑定。
+
+## 7. CE 第一阶段启动清单（2026-10-07）
+
+实际清单 SHA-256：`82089f0cc62e2bc40ffceeee826f72d68d862f7277bfe9ca2733e567d3619ee5`。
+源代码/配置 SHA-256：`a9b05cc1e4abf55561513216f09df491b37c5fdd0700fe7fbc95fa32990dce71`。
+三个模型各执行 seeds=42、43、44，顺序建议 MiniCNN → VGGLite → MicroResNet。
+每次独立 run；loss=cross_entropy、普通随机采样、类别专属增强关闭、常规增强开启。
+统一 LR=3e-4、batch=128、最多90轮，允许现有冻结早停，GPU AMP开启、workers=0。
+`best.pth` 按 PublicTest val_acc 选择；最终并报 accuracy/macro-F1/balanced accuracy/各类 recall，
+按每模型3个seed报告均值及样本标准差。保留官方划分及其重复披露，不宣称去重训练。
+
+准备检查已通过：Windows `.venv`、PyTorch 2.14.1+cu130、RTX 5070 Ti Laptop；
+九组真实配置均通过正式初始化与计划匹配，并以真实128张训练样本完成GPU AMP前向和反向，
+loss/梯度有限；没有optimizer更新、没有正式epoch、没有创建持久run，临时目录已删除。
+这只验证启动与单批计算，不代表完成正式实验或新增精度结论。
+
+建议把本次冻结清单与同步文档提交一次，以保持正式run的Git记录干净。
+这些文档/清单的提交不会改变已绑定的源码/配置指纹。运行前接通电源并关闭自动睡眠。
+从项目根目录用PowerShell启动第一项：
+
+```powershell
+Set-Location 'D:\Document\Unniversity\emotion_recognition'
+.\.venv\Scripts\python.exe -X utf8 training/train.py --config configs/baseline_config.yaml --model mini_cnn --seed 42 --epochs 90 --purpose formal
+```
+
+结束后依次将seed改为43/44，再对vgg_lite、micro_resnet执行三种seed，共九次。
+首次从头训练不传 `--resume`。不要直接省略 `--config` 或 `--purpose formal`，
+默认主配置不是本阶段CE基线，默认用途smoke也不属于正式实验。
+
+中断时按一次Ctrl+C，等待保存退出；续训显式指定同run的 `checkpoints/last.pth`，
+仍带同一config/model/seed/purpose，`--epochs` 是本会话追加轮数，不能使累计轮数超过90。
+例如完整训练到第20轮时最多追加70轮；已完成预算或合规早停的finished run不再续训。
+尽量不用 `--resume auto`，以免选择到其他seed/配置的run。
+
+第一项结束后检查 run_meta 为finished/experiment_completed=true、history完整，
+last/best可读且正式准入通过，然后继续其他八项。PublicTest用于既定模型选择；
+每个完成run的best在PrivateTest上只做一次最终评估，保存逐样本预测，不据此调整配置。

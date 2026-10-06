@@ -131,6 +131,12 @@ pip install -e ".[dev]"
 
 ### 3. 训练模型
 
+**当前正式重训第一阶段：CE 基线。** 已冻结 `comparison-ce-v1`，三个模型各执行
+seeds=42/43/44，共9次；启动命令、预算与续训规则见
+[比较协议第7节](docs/comparison_protocol_draft.md#7-ce-第一阶段启动清单2026-10-07)。
+必须显式指定 `--config configs/baseline_config.yaml --purpose formal`；
+下面的通用命令默认属于流程验证，不能代替本次正式CE实验。
+
 **CLI 方式**（推荐；每次运行创建独立 run 目录）：
 
 ```bash
