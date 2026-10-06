@@ -37,8 +37,10 @@ import json
 from pathlib import Path
 
 import torch
+import yaml
 
-from utils.model_spec import file_sha256
+from utils.formal_protocol import completion_reason, load_frozen_protocol, validate_formal_plan
+from utils.model_spec import ModelSpec, build_model_from_spec, file_sha256
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNS_DIR = PROJECT_ROOT / "training" / "runs"
@@ -258,17 +260,15 @@ def check_formal_eligibility(
       1) run_meta.json 存在且含数据指纹（data.csv_sha256）；
       2) ``run_purpose == "formal"``（训练入口 ``--purpose formal`` 显式声明；
          缺省 / smoke / diagnose 均视为非正式）；
-      3) ``run_meta.frozen_protocol`` 记录存在，且**当前**冻结协议文件与记录一致
-         （protocol_id 存在 + 文件字节 SHA-256 相符）——防止事后更换冻结内容；
-      4) 训练正常结束：``status == "finished"``（早停亦以 finished + stop_reason 收尾；
-         不机械要求恰好 90 轮；interrupted / failed / running 均非正式）；
-      5) 完整断点：``checkpoints/last.pth`` 存在且 ``partial=False``。
+      3) 可执行冻结清单与实际配置/seed/数据/模型/臂逐项相符；
+      4) 达到预算或可复算的合规早停；仅结束会话的 session_completed 不准入；
+      5) v3 last/best 的真实结构、完整进度与 history/config/meta/来源全部绑定。
 
     Returns:
         {"run_dir", "run_purpose", "status", "frozen_protocol",
          "formal_eligible": bool, "reasons": [...]}
     """
-    from training.checkpoint import load_checkpoint_metadata
+    from training.state_validation import validate_checkpoint_payload
 
     run_dir = Path(run_dir)
     result: dict = {
@@ -293,6 +293,9 @@ def check_formal_eligibility(
         result["reasons"].append(f"run_meta.json 不可解析: {e}")
         return result
 
+    if not isinstance(meta, dict):
+        result["reasons"].append("run_meta 必须为字典")
+        return result
     result["run_purpose"] = meta.get("run_purpose")
     result["status"] = meta.get("status")
     result["frozen_protocol"] = meta.get("frozen_protocol")
@@ -304,6 +307,7 @@ def check_formal_eligibility(
         )
 
     frozen = meta.get("frozen_protocol")
+    record = None
     if not isinstance(frozen, dict) or not frozen.get("protocol_id"):
         result["reasons"].append("缺少冻结协议绑定（frozen_protocol 记录）")
     else:
@@ -315,6 +319,13 @@ def check_formal_eligibility(
                 "冻结协议文件与 run 记录不一致（file_sha256 不符）"
                 "——冻结内容不得事后变更"
             )
+        else:
+            try:
+                record = load_frozen_protocol(fp)
+                if record != frozen:
+                    raise ValueError("冻结协议 id/实际清单与 run 绑定不一致")
+            except (ValueError, KeyError, TypeError) as e:
+                result["reasons"].append(f"冻结协议非法: {e}")
 
     data = meta.get("data")
     if not (isinstance(data, dict) and data.get("csv_sha256")):
@@ -327,11 +338,57 @@ def check_formal_eligibility(
     if not last_path.exists():
         result["reasons"].append("缺少完整断点 checkpoints/last.pth")
     else:
-        md = load_checkpoint_metadata(last_path)
-        if md is None:
-            result["reasons"].append("last.pth 不可读")
-        elif md.get("partial"):
-            result["reasons"].append("last.pth 为 partial（含未完成 epoch 更新）")
+        try:
+            last = torch.load(last_path, map_location="cpu", weights_only=False)
+            # Building a model for shape/schema checks must not consume caller RNG.
+            with torch.random.fork_rng(devices=[]):
+                model = build_model_from_spec(ModelSpec.from_dict(last["model_spec"]))
+            validate_checkpoint_payload(last, model)
+            if last["partial"]:
+                raise ValueError("last.pth 为 partial")
+            if (last["run_id"] != run_dir.name or meta.get("run_id") != run_dir.name
+                    or last["model_name"] != meta.get("model_name")
+                    or last["model_spec"] != meta.get("model_spec")
+                    or last.get("run_purpose") != "formal"
+                    or last.get("frozen_protocol") != frozen):
+                raise ValueError("last 与模型/run/用途/冻结绑定不匹配")
+            protocol = last["training_protocol"]
+            if protocol["data_fingerprint"] != data:
+                raise ValueError("last 数据指纹与 run_meta 不匹配")
+            history = json.loads((run_dir / "history.json").read_text(encoding="utf-8"))
+            if history != last["history"] or meta.get("final_epoch") != last["epoch"]:
+                raise ValueError("last/history/meta 进度不匹配")
+            # Reconcile saved effective config with the checkpoint's normalized snapshot.
+            from training.trainer import _PROTOCOL_WHITELIST_PATHS, _delete_config_path
+
+            config = yaml.safe_load((run_dir / "config_effective.yaml").read_text("utf-8"))
+            for path in _PROTOCOL_WHITELIST_PATHS:
+                _delete_config_path(config, path)
+            if config != protocol["config"] or meta.get("seed") != config["seed"]:
+                raise ValueError("生效配置/seed 与断点不匹配")
+            if record is None:
+                raise ValueError("缺少合法可执行冻结清单")
+            plan = validate_formal_plan(
+                record, last["model_name"], last["model_spec"], protocol
+            )
+            reason = completion_reason(plan, last)
+            if (reason is None or not meta.get("experiment_completed")
+                    or meta.get("completion_reason") != reason):
+                raise ValueError("未达到冻结预算且无合规早停，或完成标记不一致")
+            best = torch.load(
+                run_dir / "checkpoints" / "best.pth", map_location="cpu", weights_only=False
+            )
+            validate_checkpoint_payload(best, model)
+            if (best["partial"] or best["epoch"] != last["best"]["epoch"]
+                    or any(best.get(k) != last.get(k) for k in (
+                        "run_id", "model_name", "model_spec", "training_protocol",
+                        "run_purpose", "frozen_protocol",
+                    ))
+                    or any(best["history"][k] != v[:best["epoch"]]
+                           for k, v in last["history"].items())):
+                raise ValueError("best 与当前 run/历史/协议不匹配")
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError) as e:
+            result["reasons"].append(f"正式产物不完整/不合规: {e}")
 
     result["formal_eligible"] = not result["reasons"]
     return result

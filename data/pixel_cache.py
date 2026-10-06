@@ -31,9 +31,11 @@ import hashlib
 import json
 import os
 import time
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -109,7 +111,14 @@ def parse_pixels_column(pixel_strings) -> np.ndarray:
     n = len(pixel_strings)
     out = np.empty((n, *PIXEL_SHAPE), dtype=np.uint8)
     for i, s in enumerate(pixel_strings):
-        vals = np.fromstring(s, dtype=np.float32, sep=" ")
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                vals = np.fromstring(s, dtype=np.float64, sep=" ")
+        except (ValueError, Warning) as e:
+            raise ValueError(f"像素解析失败：第 {i} 行含非法词元/尾部垃圾") from e
+        if not bool(np.isfinite(vals).all()):
+            raise ValueError(f"像素解析失败：第 {i} 行存在非有限值")
         if vals.shape != (PIXELS_PER_IMAGE,):
             raise ValueError(
                 f"像素解析失败：第 {i} 行得到 {vals.shape[0] if vals.ndim else '?'} 个值"
@@ -137,7 +146,15 @@ def _parse_split_dataframe(df: pd.DataFrame, split: str) -> dict:
         raise ValueError(f"划分 {split} 为空，无法构建缓存")
     sub = df.loc[mask]
     x = parse_pixels_column(sub["pixels"].values)
-    y = sub["emotion"].to_numpy(dtype=np.int64)
+    raw_labels = pd.to_numeric(sub["emotion"], errors="raise").to_numpy(dtype=np.float64)
+    valid = (
+        np.isfinite(raw_labels) & (raw_labels == np.floor(raw_labels))
+        & (raw_labels >= 0) & (raw_labels < _NUM_CLASSES)
+    )
+    if not bool(valid.all()):
+        row = sub.index[int(np.flatnonzero(~valid)[0])]
+        raise ValueError(f"划分 {split} 原行 {row} 含非法标签，须为 0–6 的有限整数")
+    y = raw_labels.astype(np.int64)
     if y.size and (int(y.min()) < 0 or int(y.max()) >= _NUM_CLASSES):
         raise ValueError(
             f"划分 {split} 含非法标签（期望 0–{_NUM_CLASSES - 1}，"
@@ -175,7 +192,8 @@ def _write_split_files(cache_dir: Path, split: str, data: dict) -> dict:
     out = {}
     for kind in ("x", "y", "rows"):
         arr = data[kind]
-        final = cache_dir / f"{split}_{kind}.npy"
+        # A new generation never overwrites files held by an active dataset/worker.
+        final = cache_dir / f"{split}_{kind}_{uuid4().hex}.npy"
         tmp = final.with_name(final.name + ".tmp")
         # 注意：np.save 对不以 .npy 结尾的路径会自动追加后缀，需用 file object 写入
         with open(tmp, "wb") as f:
@@ -425,6 +443,17 @@ class PixelCache:
         _close_cached_mmaps(self.cache_dir)
 
 
+def check_cache_ref(cache_ref) -> None:
+    """Cheap batch-boundary protection for immutable files, CSV and meta generation."""
+    cache_dir, _split, entry = cache_ref
+    for kind in ("x", "y", "rows"):
+        if not _stat_signature_matches(Path(cache_dir) / entry[kind]["file"], entry[kind]):
+            raise PixelCacheCorruptedError(f"缓存 {kind} 已变化，拒绝继续使用")
+    for record in entry.get("source_signatures", []):
+        if not _stat_signature_matches(Path(record["path"]), record):
+            raise PixelCacheCorruptedError("CSV/meta 代际已变化，拒绝继续使用")
+
+
 def get_memmap_split(cache_ref) -> tuple:
     """
     worker/dataset 侧按索引访问所需的轻量打开：（cache_dir, split, entry）→ (x, y, rows)。
@@ -433,15 +462,12 @@ def get_memmap_split(cache_ref) -> tuple:
     - 打开后仍做 shape/dtype 轻量检查；文件缺失/损坏会抛出 PixelCacheCorruptedError
     """
     cache_dir, split, entry = cache_ref
+    check_cache_ref(cache_ref)
     key = (str(cache_dir), str(split))
     hit = _MMAP_CACHE.get(key)
     if hit is not None and hit["file_x"] == entry["x"]["file"]:
         # T04：命中同样做 stat 签名快查（数据源变化 → 拒绝继续，避免读到被替换的数据）
-        if all(_stat_signature_matches(Path(cache_dir) / entry[k]["file"], entry[k])
-               for k in ("x", "y", "rows")):
-            return hit["x"], hit["y"], hit["rows"]
-        _MMAP_CACHE.pop(key, None)
-        gc.collect()
+        return hit["x"], hit["y"], hit["rows"]
 
     p = Path(cache_dir)
     for kind in ("x", "y", "rows"):
@@ -452,6 +478,8 @@ def get_memmap_split(cache_ref) -> tuple:
             raise PixelCacheCorruptedError(
                 f"缓存文件 stat 签名不符（数据源已变化，拒绝继续使用）: {fp.name}"
             )
+        if file_sha256_cached(fp) != entry[kind]["sha256"]:
+            raise PixelCacheCorruptedError(f"缓存文件 SHA-256 不符（worker 侧）: {fp.name}")
     try:
         x = np.load(p / entry["x"]["file"], mmap_mode="r")
         y = np.load(p / entry["y"]["file"])
@@ -465,6 +493,9 @@ def get_memmap_split(cache_ref) -> tuple:
         )
     if tuple(y.shape) != tuple(entry["y"]["shape"]) or str(y.dtype) != entry["y"]["dtype"]:
         raise PixelCacheCorruptedError(f"缓存标签 shape/dtype 异常: {y.shape}/{y.dtype}")
+    if (tuple(rows.shape) != tuple(entry["rows"]["shape"])
+            or str(rows.dtype) != entry["rows"]["dtype"]):
+        raise PixelCacheCorruptedError(f"缓存行号 shape/dtype 异常: {rows.shape}/{rows.dtype}")
     # T04：y/rows 一律只读
     y.setflags(write=False)
     rows.setflags(write=False)

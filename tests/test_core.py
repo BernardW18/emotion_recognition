@@ -221,15 +221,8 @@ class TestTrainer:
 
     def test_save_and_load_checkpoint(self, dummy_config, dummy_loader, tmp_path):
         trainer = self._make_trainer(dummy_config, dummy_loader, tmp_path)
-        # 模拟 fit() 的行为：设置 _current_epoch 后训练 + 评估，追加 history
-        trainer._current_epoch = 1
-        train_loss, train_acc = trainer.train_one_epoch()
-        val_loss, val_acc, val_top5 = trainer.evaluate()
-        for k, v in [("train_loss", train_loss), ("train_acc", train_acc),
-                      ("val_loss", val_loss), ("val_acc", val_acc),
-                      ("val_top5_acc", val_top5)]:
-            trainer.history[k].append(v)
-        trainer.history["lr"].append(0.001)
+        # Real complete progress, including update counters, scheduler and best/early-stop.
+        trainer.fit(1)
 
         # 保存（epoch 应为 1，因为 history 有 1 条记录）
         ckpt_path = tmp_path / "test.pth"

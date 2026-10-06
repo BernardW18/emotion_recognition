@@ -19,8 +19,8 @@ run 目录结构:
             epoch_XXXX.pth         # 定期断点
             interrupted_*.pth      # 中断断点（partial=True）
 
-checkpoint 格式版本: 2。旧格式（1，training/checkpoints/ 下历史产物）不包含
-RNG / scaler / 早停状态，不支持精确续训，load 时明确报错（不静默降级）。
+checkpoint 格式版本: 3，新增实际更新/尝试数及完整进度校验。版本 1/2 缺少
+可验证更新记录，不支持精确续训；历史权重仍可推理/评估，不静默迁移。
 
 用法:
     from training.checkpoint import save_checkpoint, load_checkpoint
@@ -61,12 +61,14 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from training.state_validation import FORMAT_VERSION, validate_checkpoint_payload
+
 # 项目根目录（直接计算，避免循环依赖）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 logger = logging.getLogger("checkpoint")
 
-CHECKPOINT_FORMAT_VERSION = 2
+CHECKPOINT_FORMAT_VERSION = FORMAT_VERSION
 
 # 训练协议快照版本（S01/S02：完整生效配置 + 运行时有效值 + 数据管线规格）
 TRAINING_PROTOCOL_VERSION = 2
@@ -300,6 +302,11 @@ def _verify_checkpoint_state(trainer, checkpoint: dict) -> dict:
     """
     report: dict[str, str] = {}
     problems: list[str] = []
+    validate_checkpoint_payload(
+        checkpoint, getattr(trainer.model, "_orig_mod", trainer.model)
+    )
+    if checkpoint["rng_cuda_device_count"] != torch.cuda.device_count():
+        raise RuntimeError("CUDA RNG 设备数量/映射与当前环境不一致，拒绝精确恢复")
 
     # ---- 1) 全局 RNG（python / numpy / torch / cuda）----
     rng = checkpoint.get("rng")
@@ -329,8 +336,8 @@ def _verify_checkpoint_state(trainer, checkpoint: dict) -> dict:
                 problems.append("断点含 CUDA RNG 状态，但当前环境无 CUDA：无法完整恢复")
             else:
                 try:
-                    for state_i in rng["torch_cuda"]:
-                        torch.Generator(device="cuda").set_state(state_i)
+                    for index, state_i in enumerate(rng["torch_cuda"]):
+                        torch.Generator(device=f"cuda:{index}").set_state(state_i)
                 except Exception as e:
                     problems.append(f"rng.torch_cuda 非法（无法恢复）: {e}")
     report["global_rng"] = "ok"
@@ -463,6 +470,14 @@ def _verify_checkpoint_state(trainer, checkpoint: dict) -> dict:
         if n_cur != n_ck:
             problems.append(f"优化器 param_groups 数量不匹配: 断点 {n_ck} vs 当前 {n_cur}")
         else:
+            for current_group, saved_group in zip(
+                trainer.optimizer.param_groups, opt_state["param_groups"], strict=True
+            ):
+                if len(current_group["params"]) != len(saved_group["params"]):
+                    problems.append("优化器每组参数数目不匹配")
+                for key, value in current_group.items():
+                    if key not in ("params", "lr") and saved_group.get(key) != value:
+                        problems.append(f"优化器静态参数 {key} 与实际配置不一致")
             flat_params = [p for g in trainer.optimizer.param_groups for p in g["params"]]
             for pid, st in opt_state["state"].items():
                 if not isinstance(st, dict):
@@ -493,7 +508,7 @@ def _verify_checkpoint_state(trainer, checkpoint: dict) -> dict:
     return report
 
 
-def _restore_training_state(trainer, checkpoint: dict) -> dict:
+def _apply_training_state(trainer, checkpoint: dict) -> dict:
     """
     状态恢复的共享实现（load_checkpoint 与 S03 自动回滚共用）：
 
@@ -547,6 +562,9 @@ def _restore_training_state(trainer, checkpoint: dict) -> dict:
 
     # 累计训练时间
     trainer._accumulated_train_time = checkpoint.get("training_duration_seconds", 0.0)
+    trainer._total_train_time = trainer._accumulated_train_time
+    trainer._optimizer_updates = checkpoint["optimizer_updates"]
+    trainer._optimizer_attempts = checkpoint["optimizer_attempts"]
 
     # 本轮 best（值/epoch 恢复，保证“同一后续指标序列触发于相同位置”）
     best = checkpoint.get("best") or {}
@@ -581,6 +599,54 @@ def _restore_training_state(trainer, checkpoint: dict) -> dict:
     return {"saved_epoch": saved_epoch}
 
 
+def _restore_training_state(trainer, checkpoint: dict, *, on_commit=None) -> dict:
+    """Commit all live state atomically; unexpected late errors restore every component."""
+    model = getattr(trainer.model, "_orig_mod", trainer.model)
+    model_state = copy.deepcopy(model.state_dict())
+    optimizer_state = copy.deepcopy(trainer.optimizer.state_dict())
+    scheduler_state = copy.deepcopy(trainer.scheduler.state_dict()) if trainer.scheduler else None
+    scaler_state = copy.deepcopy(trainer.scaler.state_dict()) if trainer.scaler else None
+    rng = _capture_rng_state()
+    loader_rng = _capture_loader_rng(trainer.train_loader)
+    names = (
+        "history", "start_epoch", "_accumulated_train_time", "_total_train_time",
+        "best_val_acc", "best_epoch", "best_monitor_value", "acc_patience_counter",
+        "loss_worse_counter", "hist_min_val_loss", "_optimizer_updates",
+        "_optimizer_attempts", "run_meta", "_partial_state",
+    )
+    saved = {name: copy.deepcopy(getattr(trainer, name)) for name in names}
+    meta_path = trainer.run_dir / "run_meta.json"
+    meta_bytes = meta_path.read_bytes() if meta_path.exists() else None
+    try:
+        result = _apply_training_state(trainer, checkpoint)
+        if on_commit is not None:
+            on_commit()
+        return result
+    except BaseException:
+        model.load_state_dict(model_state)
+        trainer.optimizer.load_state_dict(optimizer_state)
+        if trainer.scheduler is not None:
+            trainer.scheduler.load_state_dict(scheduler_state)
+        if trainer.scaler is not None:
+            trainer.scaler.load_state_dict(scaler_state)
+        for name, value in saved.items():
+            setattr(trainer, name, value)
+        if meta_bytes is None:
+            meta_path.unlink(missing_ok=True)
+        elif not meta_path.exists() or meta_path.read_bytes() != meta_bytes:
+            fd, tmp = tempfile.mkstemp(dir=meta_path.parent, prefix=".rollback_", suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(meta_bytes)
+                os.replace(tmp, meta_path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        _restore_rng_state(rng)
+        _restore_loader_rng(trainer.train_loader, loader_rng)
+        raise
+
+
 def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool = False):
     """
     保存完整训练状态（原子写入）。
@@ -611,6 +677,12 @@ def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool
         # torch.compile 的 OptimizedModule 会加 "_orig_mod." 前缀，保存前展开
         "model_state_dict": getattr(trainer.model, "_orig_mod", trainer.model).state_dict(),
         "optimizer_state_dict": trainer.optimizer.state_dict(),
+        "optimizer_updates": trainer._optimizer_updates,
+        "optimizer_attempts": trainer._optimizer_attempts,
+        "training_device": str(trainer.device),
+        "rng_cuda_device_count": torch.cuda.device_count(),
+        "run_purpose": trainer.run_purpose,
+        "frozen_protocol": trainer.frozen_protocol,
         "epoch": epoch_num,
         "val_acc": hist["val_acc"][-1] if hist.get("val_acc") else None,
         "val_loss": hist["val_loss"][-1] if hist.get("val_loss") else None,
@@ -799,6 +871,20 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             + "\n  - ".join(protocol_diffs)
         )
 
+    if checkpoint.get("run_purpose") == "formal" or trainer.run_purpose == "formal":
+        from utils.formal_protocol import validate_formal_plan
+
+        if checkpoint.get("run_purpose") != trainer.run_purpose:
+            raise RuntimeError("正式用途不一致，不能将 smoke 与 formal 相互转换续写")
+        if checkpoint.get("frozen_protocol") != trainer.frozen_protocol:
+            raise RuntimeError("正式断点的冻结协议绑定不一致")
+        if checkpoint.get("run_id") != trainer.run_id:
+            raise RuntimeError("正式断点不能恢复到其他 run")
+        validate_formal_plan(
+            trainer.frozen_protocol, trainer.model_name, current_spec,
+            trainer.get_training_protocol(),
+        )
+
     # S01：loader 生成器状态必须随断点保存（v2 协议断点必含）
     if checkpoint.get("loader_rng") is None:
         raise RuntimeError(
@@ -810,7 +896,14 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
     state_integrity = _verify_checkpoint_state(trainer, checkpoint)
 
     # ---- 全部校验通过：恢复训练状态（与 S03 自动回滚共享实现）----
-    _restore_training_state(trainer, checkpoint)
+    notes = [fallback_note] if fallback_note else []
+    _restore_training_state(
+        trainer, checkpoint,
+        on_commit=lambda: trainer._record_resume_event(
+            checkpoint_path, protocol_verified=True, notes=notes,
+            state_integrity=state_integrity,
+        ),
+    )
 
     logger.info("已从 %s 恢复训练:", checkpoint_path)
     logger.info("  - 上次训练到 epoch %s", checkpoint.get("epoch", "?"))
@@ -826,12 +919,6 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
     logger.info("  - 将从 epoch %d 继续训练", trainer.start_epoch)
     # 恢复成功后才写恢复事件（此前任何失败都不会改写原 run 元数据）；
     # T01/T03：协议一致（protocol_verified）与完整状态恢复（state_integrity）分开记录
-    notes = [fallback_note] if fallback_note else []
-    trainer._record_resume_event(
-        checkpoint_path, protocol_verified=True, notes=notes,
-        state_integrity=state_integrity,
-    )
-
     return checkpoint
 
 

@@ -466,23 +466,21 @@ def test_trainer_rejects_batched_impl_with_dataset_transform(tmp_path):
 def test_early_stop_state_roundtrip(tmp_path):
     """best / 早停计数在保存-恢复后保持一致。"""
     config = _make_config()
+    config["training"].update(patience=10, val_loss_patience=10)
     t = _make_trainer(config, run_dir=tmp_path / "r1")
-    t.best_val_acc = 0.7
-    t.best_epoch = 5
-    t.best_monitor_value = 0.7
-    t.acc_patience_counter = 2
-    t.hist_min_val_loss = 0.5
-    t.loss_worse_counter = 3
+    metrics = iter([(0.5, 0.7, 1.0), (0.6, 0.6, 1.0), (0.7, 0.6, 1.0)])
+    t.evaluate = lambda: next(metrics)
+    t.fit(3)
     path = t.checkpoints_dir / "state.pth"
     t.save_checkpoint(path)
 
     t2 = _make_trainer(config, run_dir=tmp_path / "r2")
     t2.load_checkpoint(path)
     assert t2.best_val_acc == pytest.approx(0.7)
-    assert t2.best_epoch == 5
+    assert t2.best_epoch == 1
     assert t2.acc_patience_counter == 2
     assert t2.hist_min_val_loss == pytest.approx(0.5)
-    assert t2.loss_worse_counter == 3
+    assert t2.loss_worse_counter == 2
 
 
 # ============================================================

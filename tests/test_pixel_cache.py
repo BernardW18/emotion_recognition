@@ -150,7 +150,9 @@ def test_corrupted_npy_triggers_rebuild(mini_cache):
     x_ref, _y, _rows = ref.split_arrays("Training")
     assert np.array_equal(np.asarray(x[:]), np.asarray(x_ref[:])), "重建后数据应与源一致"
     # meta 中的 SHA 应更新为当前文件
-    assert pixel_cache.file_sha256_cached(target) == pc2.meta["splits"]["Training"]["x"]["sha256"]
+    current = pc2.meta["splits"]["Training"]["x"]
+    assert current["file"] != fname
+    assert pixel_cache.file_sha256_cached(cache_dir / current["file"]) == current["sha256"]
 
 
 def test_meta_version_mismatch_triggers_rebuild(mini_cache):
@@ -351,7 +353,9 @@ def test_hot_hit_detects_tampered_file(mini_cache):
 
     x2, _y2, _rows2 = pc.split_arrays("Training")   # 热命中路径 → stat 检测 → 重建
     assert np.array_equal(np.asarray(x2[:]), x_ref), "重建后数据应与源一致"
-    assert pixel_cache.file_sha256_cached(ypath) == pc.meta["splits"]["Training"]["y"]["sha256"]
+    current = pc.meta["splits"]["Training"]["y"]
+    assert current["file"] != entry["file"]
+    assert pixel_cache.file_sha256_cached(cache_dir / current["file"]) == current["sha256"]
 
 
 def test_worker_side_stat_check_rejects(mini_cache):

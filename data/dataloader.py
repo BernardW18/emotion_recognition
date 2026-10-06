@@ -28,6 +28,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 from data.pixel_cache import (
+    check_cache_ref,
     file_sha256_cached,
     get_memmap_split,
     load_or_build,
@@ -132,9 +133,24 @@ class FER2013Dataset(Dataset):
         return self._n
 
     def __getitem__(self, idx):
+        arrays = get_memmap_split(self._cache_ref) if self._cache_ref is not None else None
+        return self._get_sample(idx, arrays)
+
+    def __getitems__(self, indices):
+        """Preserve scalar index/RNG order while validating once before and after a batch."""
+        arrays = get_memmap_split(self._cache_ref) if self._cache_ref is not None else None
+        samples = [self._get_sample(idx, arrays) for idx in indices]
+        self.validate_cache()
+        return samples
+
+    def validate_cache(self):
         if self._cache_ref is not None:
+            check_cache_ref(self._cache_ref)
+
+    def _get_sample(self, idx, arrays=None):
+        if arrays is not None:
             # 缓存路径：只读 mmap 取单张（uint8 slice → float32 /255）
-            x_mm, y_mm, _rows = get_memmap_split(self._cache_ref)
+            x_mm, y_mm, _rows = arrays
             image = np.asarray(x_mm[idx], dtype=np.float32)
             image /= 255.0
             label = int(y_mm[idx])
@@ -338,6 +354,16 @@ def create_dataloaders(config: dict, model_name: str | None = None, *,
     train_dataset.split_fingerprint = compute_split_fingerprint_cached(dataset_path, pixel_cache)
 
     # DataLoader 配置
+    source_signatures = []
+    for source in (Path(dataset_path), pixel_cache.cache_dir / "meta.json"):
+        stat = source.stat()
+        source_signatures.append({
+            "path": str(source.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+        })
+    for dataset in (train_dataset, val_dataset):
+        if dataset is not None and dataset._cache_ref is not None:
+            dataset._cache_ref[2]["source_signatures"] = source_signatures
+
     dl_config = config.get("dataloader", {})
     train_workers = dl_config.get("num_workers", 0)
     pin_memory = dl_config.get("pin_memory", use_cuda)
@@ -414,6 +440,8 @@ def create_dataloaders(config: dict, model_name: str | None = None, *,
             cache_ref=(pixel_cache.cache_dir, "PrivateTest",
                        pixel_cache.meta["splits"]["PrivateTest"]),
         )
+        if test_dataset._cache_ref is not None:
+            test_dataset._cache_ref[2]["source_signatures"] = source_signatures
         test_loader = DataLoader(test_dataset, shuffle=False, **eval_loader_kwargs)
 
     return train_loader, val_loader, test_loader, class_names

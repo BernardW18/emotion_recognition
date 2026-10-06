@@ -17,8 +17,9 @@
   版本化模型规格与加载逻辑；结构参数（激活函数 / dropout / SE）不再因默认值退化而不一致。
 - **run 隔离**：每次训练写入独立目录 `training/runs/<模型>/<run_id>/`（生效配置、
   run 元数据、history、last/best 断点），不同 seed/配置的运行完全分开、可反查。
-- **完整续训**：`last.pth` 保存 RNG / AMP scaler / 早停计数 / best 状态；恢复后与
-  连续训练逐批次一致（回归测试验证）；中断断点明确标记 `partial`。
+- **完整续训**：`last.pth` 保存 RNG / AMP scaler / 早停计数 / best 状态；合法完整状态的
+  新v3状态校验与事务回滚通过CPU/CUDA恢复及异常反例回归；旧v1/v2拒绝精确恢复；
+  中断断点明确标记 `partial` 并回退到同 run 完整 last。
 - **早停**：val_acc 无改善（`training.patience`）与 val_loss 恶化（高于历史最优的倍率，
   `val_loss_patience` + `val_loss_threshold`）双监控，触发时记录原因；`=0` 为禁用。
 - **统一评估入口**：显式 checkpoint + split，输出完整指标、逐样本预测与概率、
@@ -35,12 +36,13 @@
   正式实验要求冻结协议文件（`docs/comparison_protocol_frozen.json`）存在并绑定入
   run_meta（id + 文件 SHA-256）；来源绑定（run-bound）≠ 正式资格，
   正式准入由 `utils.comparison_check.check_formal_eligibility` 独立判定
-  （用途声明 + 冻结绑定一致 + 正常结束 + 完整断点 + 数据指纹）。
-- **性能（PB01–PB05）**：批级张量增强（`augmentation.impl`，独立实现，作者短程流程测量提速
+  （可执行清单/代码指纹/实际配置与数据 + 预算或合规早停 + 真实完整last/best）。
+  分次训练的 session_completed 不能进入正式汇总；冻结工具见协议 §6。
+- **性能（PB01–PB05，历史执行记录）**：批级张量增强（`augmentation.impl`，独立实现，作者短程流程测量提速
   88.4%（workers=0）/ 39.0%（workers=4））；uint8 像素缓存（工厂加载 8.7→0.24s，逐位一致）；
   评估快速路径（完整评估 -96.0%）；Grad-CAM 按需 + 缓存（命中 -92.6%~-95.5%）；
   fused Adam 为可选项（默认关，实测 ~4.9–5.2%）。
-- **质量门槛**：pytest（233 项）+ ruff + mypy（全项目 43 个源文件 0 错误）全部通过。
+- **质量门槛**：pytest（285 项）+ ruff + mypy（全项目 47 个源文件 0 错误）全部通过。
 
 ---
 
@@ -94,7 +96,7 @@ emotion_recognition/
 │   └── confusion_matrices/  roc_curves/  training_curves/
 ├── docs/
 │   └── data_audit.md            # 数据重复披露与去重协议草案
-├── tests/                       # 测试（233 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
+├── tests/                       # 测试（285 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
 ├── pyproject.toml               # 项目配置 + ruff + mypy
 ├── requirements.txt             # 依赖安装入口（CUDA 组合）
 └── README.md
@@ -155,8 +157,8 @@ Checkpoint 选择器（列出 `training/runs/` 下的可续训断点）。
 - **开始**：运行 CLI 命令或训练 Notebook Cell。
 - **暂停**：`Ctrl+C` / Jupyter 停止按钮——保存 `interrupted_*` 断点（`partial` 标记）。
 - **继续**：`--resume auto`（最新完整 `last.pth`）或指定断点路径。
-  当前主/基线配置默认 persistent workers，不能精确续训（T02）；训练前需改为非持久模式。
-  只选择完整 last/best 断点；显式 interrupted 断点有 T01 的额外更新问题，尚待修复。
+  主/基线默认 num_workers=0、persistent_workers=false（T02 已复核）。
+  显式 interrupted 断点自动回滚到同 run 完整 last；没有合法完整 last 则拒绝（T01 已复核）。
 - **停止**：早停自动触发（原因记录在 run 元数据与输出）。
 - **产物**：`training/runs/<模型>/<run_id>/`：`config_effective.yaml`、`run_meta.json`
   （CLI 参数 / seed / git / 环境 / 数据指纹 / 状态 / 恢复事件）、`history.json`、
@@ -166,7 +168,7 @@ Checkpoint 选择器（列出 `training/runs/` 下的可续训断点）。
   其状态随断点保存/恢复，批次序列与 worker 种子可复算——回归覆盖普通/增强/
   加权采样组合）。`persistent_workers=true` 不提供精确恢复（启动时提示、加载时拒绝）。
   恢复端的数据管线规格（workers/persistent/sampler/batch）必须与断点一致；
-  训练协议（完整生效配置 + 数据指纹）任一变化都会被拒绝；状态缺项保护仍待 T03 补齐。
+  训练协议（完整生效配置 + 数据指纹）任一变化都会被拒绝；v3记录实际更新进度，预检关键状态并在任何加载/事件提交失败时事务回滚，详见当前审核。
 
 ### 4. 评估
 
@@ -299,23 +301,22 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 - **数据分析**: Jupyter Notebook + Pandas + Matplotlib + Seaborn
 - **评估**: scikit-learn（混淆矩阵 / ROC / 分类报告）+ 自实现 ECE/NLL
 - **可解释性**: Grad-CAM 热力图（纯手写，无第三方依赖）
-- **质量保证**: pytest（233 项通过）+ ruff（通过）+ mypy（全项目 43 源文件 0 错误）
+- **质量保证**: pytest（285 项通过）+ ruff（通过）+ mypy（全项目 47 源文件 0 错误）
 
 ## 项目状态与限制
 
-- 第三轮独立审核（2026-10-07，基准 b75d8e3）的 T01–T06 问题（续训完整性、缓存边界、
-  增强语义、正式实验准入）**已由第五轮修复完成并验收**，详见
-  [PROJECT_REVIEW.md](PROJECT_REVIEW.md)。批级增强与 legacy 的输出分布不同，按独立
-  实现记录。**未进行正式重训**，上表来自历史权重。
-- 第五轮修复摘要：partial 显式加载自动回滚（无同 run 完整 last 则拒绝）；默认配置
-  `workers=0` 且 non-persistent（0/2/4 配对测量选定）；恢复前状态完整性预检
-  （缺项/非法值在改动前拒绝）；缓存 v2（stat 签名/三数组只读/解析校验）；
-  增强语义冻结至 batched-v1（不再声称"同分布"）；run 用途与正式准入分离
-  （`--purpose smoke|formal` + 冻结协议绑定；当前全部 run 均判定"非正式"）。
-  质量门槛：233 项测试 + ruff + mypy（43 文件）全绿。
-- 本轮独立实测：CPU 128 张增强 56.36→1.83ms；完整 PublicTest 的 GPU **预测阶段**
-  三模型耗时减少 95.1% / 79.0% / 87.5%，同设备新旧概率最大差 0。此前完整流程数字为作者
-  短程执行记录，本轮没有重复长期训练或浏览器端到端测量；fused Adam 继续默认关闭。
+- 第四轮审核提出的 U01–U04/PB06 已直接修复并通过本轮验收：完整pytest285项、
+  Ruff、mypy47源文件和依赖检查通过，详情见 [PROJECT_REVIEW.md](PROJECT_REVIEW.md)。
+- 新版checkpoint v3记录真实更新/尝试数及完整进度；状态预检、失败事务回滚、
+  真实CUDA AMP OFF/ON恢复均通过。v1/v2不支持精确续训，历史权重仍可推理/评估。
+- 正式准入现在绑定实际源码/配置/模型/臂/seeds/数据/预算，验证真实last/best和完整
+  history/config/meta；仅结束训练会话不算完成实验。正式清单仍未创建，多seed正式
+  重训未执行，6个历史run保持非正式；历史评估分数继续按来源展示。
+- PB06安全优化已部署：128张Dataset取数的缓存文件检查384→6次，另做CSV/meta保护，
+  主进程在消费批次和更新前再检查。3组完整两轮配对中位10.312→4.536s（-56.0%），
+  历史、模型/BN及有效更新数完全一致；不外推三模型/90轮性能或准确率。
+- workers0/2/4各3次完整取数中位0.341/3.550/3.704s，继续默认workers0。
+  100批真实训练阶段P95及内存记录见审核文档；之前PB01–PB05数字保留为历史执行证据。
 - `training/checkpoints/`、`training/logs/` 为 legacy 历史产物（只读保留），
   新训练一律写入 `training/runs/`。
 - 2026-10-07 完成三次**流程验证短训练**（mini_cnn：`20261007_022921_seed42`、

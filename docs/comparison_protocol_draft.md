@@ -57,8 +57,9 @@
 > `sha256(train_seed|epoch|batch_idx)` 随训练协议快照记录）。
 > 第三轮独立审核更正：插值由 nearest 改为双线性，旋转/平移合并重采样，不能称为同分布。
 > 正式冻结须写明具体变换规则；实际实现/模型/臂保持统一，切换实现需新建 run（T05）。
-> 当前主/基线配置仍默认 persistent_workers=true，须先修复 T02 才能支持精确续训。
-> 来源绑定成功不等于正式实验准入；正式汇总还需用途、冻结和完成状态校验（T06）。
+> 第四轮独立审核（6610651）：主/基线已默认 workers=0、persistent_workers=false，T02 通过。
+> U01/U02已通过v3状态与事务回滚验收，PB06批级保护取数已实施。
+> U03准入校验已补齐实际清单和真实产物；正式冻结/多seed实验仍未执行。
 > **fused Adam**：`optimizer_fused` 保持默认 false——PB03 实测完整流程中位改善
 > ~4.9–5.2%（两轮 9 组配对），未稳定达到 ≥5% 判据，保留为可选项。
 
@@ -103,20 +104,29 @@
 - 若实施附加去重协议（`dedup-v1`），其重训结果**单独命名与报告**，
   不与官方协议结果混排（见 docs/data_audit.md §3）。
 
-## 6. 冻结流程（T06 机制已实施）
+## 6. 冻结流程（U03 实现已验收，正式方案仍未冻结）
 
-1. 本草案评审（预算表 3.1 数值、臂设计 3.2、规则取舍）；
-2. 冻结：创建 `docs/comparison_protocol_frozen.json`，至少包含：
+1. 评审第3节的预算与各臂，将实际实现/配置定稿提交；运行新增的
+   tools/freeze_comparison.py --plan MODEL ARM CONFIG（可重复）--seeds 42 43 44
+   --protocol-id 协议名 --output docs/comparison_protocol_frozen.json。
+   工具要求可追溯的干净代码基准，读取真实模型/配置/数据管线，先验证再写文件。
+   至少冻结3个不同seeds；每个模型/臂组合唯一，不能用同一实际方案重复命名不同臂。
+2. 冻结文件schema_version=1，包含protocol_id、frozen_at、git_commit、code_sha256及plans。
+   每个plan记录model_name/arm/model_spec/seeds、完整training_protocol、max_epochs、
+   allow_early_stop与lr_floor=1e-7。源码和配置字节指纹、实际参数、数据/划分指纹、
+   loader/增强版本/损失/调度器/精度均绑定；seed是清单允许的唯一计划变量。
+   只含id/日期/commit的旧标记JSON不再可用。清单变更或源码/配置变化须新协议/run。
+3. 使用 training/train.py --purpose formal --config 对应配置 --model 对应模型
+   --seed 清单seed --epochs 本会话轮数。启动、续训和准入均核对实际清单；
+   超预算拒绝。未完成预算且无允许的早停时是session_completed，不进入正式汇总；
+   达到预算或可复算的合规早停后才finished，且禁止继续追加该正式run。
+4. 汇总前验证v3 last/best真实权重与模型结构/状态、run/数据/协议、history、
+   config_effective和meta；partial、坏/外国断点、伪造完成标记或漂移设置均拒绝。
+   各模型/臂所有seeds按第4/5节报告，缺run时不宣称完整比较。
 
-   ```json
-   {"protocol_id": "comparison-v2-frozen1", "frozen_at": "YYYY-MM-DD",
-    "git_commit": "<草案定稿 commit>", "notes": "可选说明"}
-   ```
+示例（仅三个模型CE基线A；其他已定义臂需在同一次冻结命令追加实际配置）：
 
-   冻结后不得改动：run_meta 会记录该文件字节 SHA-256，正式准入判定时复核一致性；
-   事后更换冻结内容会使既有 run 失去正式资格（`check_formal_eligibility`）；
-3. 启动重训：`python training/train.py --purpose formal ...`
-   （按 3.2 的臂 × 3 seeds；执行前确认修复轮次全部复核）。
-   未冻结 / 未声明 formal 的 run 一律判定为"非正式（流程验证/诊断）"，
-   可独立查看但不进入正式汇总；
-4. 按本协议第 4/5 节报告；正式比较前本协议状态保持"待冻结/实验未执行"。
+    .\.venv\Scripts\python.exe tools/freeze_comparison.py --protocol-id comparison-v2-frozen1 --output docs/comparison_protocol_frozen.json --seeds 42 43 44 --plan mini_cnn A configs/baseline_config.yaml --plan vgg_lite A configs/baseline_config.yaml --plan micro_resnet A configs/baseline_config.yaml
+
+当前本协议保持“草案未冻结/正式实验未执行”；本次只用临时冻结清单与真实七分类
+MiniCNN小数据产物测试准入，没有创建实际冻结文件或进行正式重训。

@@ -896,17 +896,22 @@
     "new_dataset": false,
     "issue_count": 20,
     "all_issues_have_fix_plan_acceptance_and_status": true,
-    "application_code_modified": false,
+    "application_code_modified": true,
     "formal_training_rerun": false,
-    "cuda_environment_status": "Verified Windows .venv: torch 2.14.1+cu130, torchvision 0.29.1+cu130, real CUDA tensor and torchvision operation, three current models FP32/AMP updates, 36 existing tests passed",
+    "cuda_environment_status": "Project Windows venv retained; CUDA MiniCNN AMP OFF/ON resume/model/optimizer/scaler/global RNG and history equivalence verified, full285 tests pass",
     "completed_issue_ids": [
       "F20"
     ],
-    "latest_independent_audit": "third_refactor_independent_audit",
-    "latest_issue_count": 6,
+    "latest_independent_audit": "fourth_refactor_independent_audit",
+    "latest_issue_count": 5,
     "latest_p1_issue_count": 3,
-    "current_verdict": "not_fully_accepted",
-    "issue_count_scope": "issue_count=20 refers to original F01-F20; later rounds are separate"
+    "current_verdict": "requested_fixes_accepted_formal_experiments_pending",
+    "issue_count_scope": "issue_count=20 refers to original F01-F20; later rounds are separate",
+    "latest_p2_issue_count": 1,
+    "latest_performance_issue_count": 1,
+    "all_latest_issues_have_fix_plan_acceptance_and_status": true,
+    "latest_fix_execution": "fourth_audit_remediation",
+    "remaining_audited_issue_ids": []
   },
   "historical_evaluation_environment_field": "runtime_environment describes the previous CPU full-data evaluation; cuda_environment describes the current GPU capability checks; full training has not been rerun",
   "cuda_environment": {
@@ -7726,5 +7731,2025 @@
       "T06 冻结文件尚未创建（正式训练前由用户执行冻结流程）",
       "T02 配对测量为 2 轮短程完整流程，非长期训练外推"
     ]
+  },
+  "fourth_refactor_independent_audit": {
+    "checked_on": "2026-10-07",
+    "head": "6610651cfd50d7e8e5645543b788c15e322c3a7b",
+    "previous_audit_head": "b75d8e34c1b5c8ff20ce050157d1f90f55d9a075",
+    "scope": "Fourth independent refactor audit; reviews author's fifth-round T01-T06 execution record",
+    "verdict": "not_fully_accepted",
+    "windows_environment": {
+      "python_executable": "D:\\Document\\Unniversity\\emotion_recognition\\.venv\\Scripts\\python.exe",
+      "python": "3.10.11",
+      "torch": "2.14.1+cu130",
+      "torchvision": "0.29.1+cu130",
+      "cuda": "13.0",
+      "cudnn": 92400,
+      "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+      "compute_capability": [
+        12,
+        0
+      ],
+      "real_cuda_matmul_finite": true
+    },
+    "quality": {
+      "pytest": {
+        "exit_code": 0,
+        "passed": 233,
+        "warnings": 7,
+        "elapsed_s": 80.57,
+        "cpu_threads": 4,
+        "note": "Grad-CAM full backward hook warnings; no test failures"
+      },
+      "ruff": {
+        "exit_code": 0
+      },
+      "mypy": {
+        "exit_code": 0,
+        "source_files": 43,
+        "note": "Default untyped-body checking limitation retained"
+      },
+      "pip_check": {
+        "exit_code": 0
+      }
+    },
+    "previous_issues": {
+      "T01": {
+        "status": "passed",
+        "evidence": "Explicit partial falls back to same-run complete last; actual MiniCNN steps 8 vs 8 and parameter diff 0"
+      },
+      "T02": {
+        "status": "passed",
+        "evidence": "Main/baseline workers 0 and persistent false; temporary full short flow succeeds"
+      },
+      "T03": {
+        "status": "partially_passed",
+        "remaining": [
+          "U01",
+          "U02"
+        ]
+      },
+      "T04": {
+        "status": "partially_passed",
+        "remaining": [
+          "U04",
+          "PB06"
+        ]
+      },
+      "T05": {
+        "status": "implementation_and_documentation_passed",
+        "formal_accuracy_claim_pending": true
+      },
+      "T06": {
+        "status": "partially_passed",
+        "remaining": [
+          "U03"
+        ]
+      }
+    },
+    "boundary_probes": {
+      "T01_partial_recheck": {
+        "optimizer_steps": 8,
+        "continuous_steps": 8,
+        "max_parameter_diff": 0.0,
+        "notes": [
+          "显式加载的 partial 断点（interrupted_epoch002_20261007_060018.pth，含未完成 epoch 的部分更新）已自动回滚到同 run 完整断点 last.pth"
+        ],
+        "state_integrity": {
+          "global_rng": "ok",
+          "loader_rng": "ok",
+          "scheduler": "checked",
+          "amp_scaler": "not-used",
+          "model": "checked",
+          "optimizer": "checked"
+        }
+      },
+      "T02_default_configs": {
+        "configs/training_config.yaml": {
+          "num_workers": 0,
+          "persistent_workers": false
+        },
+        "configs/baseline_config.yaml": {
+          "num_workers": 0,
+          "persistent_workers": false
+        }
+      },
+      "state_precheck_matrix": {
+        "loader_rng_empty": {
+          "accepted": false,
+          "error": "RuntimeError('断点状态完整性预检未通过，恢复被拒绝（未修改任何真实状态）：\\n  - 断点缺少 sampler_generator：当前 sampler 有独立生成器，无法复算其随机进度\\n  - 断点缺少 loader_generator：当前 DataLoader 有独立生成器，无法复算其随机进度')",
+          "changed_model_state_keys": [],
+          "run_files_unchanged": true,
+          "resume_events": 0
+        },
+        "optimizer_state_empty": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "1.weight",
+            "1.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "start_epoch": 2,
+          "history_epochs": 1,
+          "optimizer_state_entries": 0
+        },
+        "optimizer_param_group_truncated": {
+          "accepted": false,
+          "error": "ValueError(\"loaded state dict contains a parameter group that doesn't match the size of optimizer's group\")",
+          "changed_model_state_keys": [
+            "1.weight",
+            "1.bias"
+          ],
+          "run_files_unchanged": true,
+          "resume_events": 0
+        },
+        "model_non_tensor_last": {
+          "accepted": false,
+          "error": "RuntimeError('模型结构不匹配，无法加载 checkpoint: Error(s) in loading state_dict for Sequential:\\n\\tWhile copying the parameter named \"1.bias\", expected torch.Tensor or Tensor-like object from checkpoint but received <class \\'str\\'>')",
+          "changed_model_state_keys": [
+            "1.weight"
+          ],
+          "run_files_unchanged": true,
+          "resume_events": 0
+        },
+        "missing_history": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "1.weight",
+            "1.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "start_epoch": 2,
+          "history_epochs": 0,
+          "optimizer_state_entries": 2
+        },
+        "missing_best": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "1.weight",
+            "1.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "start_epoch": 2,
+          "history_epochs": 1,
+          "optimizer_state_entries": 2
+        },
+        "missing_early_stop_state": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "1.weight",
+            "1.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "start_epoch": 2,
+          "history_epochs": 1,
+          "optimizer_state_entries": 2
+        },
+        "scheduler_last_epoch_bad": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "1.weight",
+            "1.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "start_epoch": 2,
+          "history_epochs": 1,
+          "optimizer_state_entries": 2
+        }
+      },
+      "cuda_rng_matrix": {
+        "missing": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "features.0.weight",
+            "features.0.bias",
+            "features.1.weight",
+            "features.1.bias",
+            "features.1.running_mean",
+            "features.1.running_var",
+            "features.1.num_batches_tracked",
+            "features.4.weight",
+            "features.4.bias",
+            "features.5.weight",
+            "features.5.bias",
+            "features.5.running_mean",
+            "features.5.running_var",
+            "features.5.num_batches_tracked",
+            "features.8.weight",
+            "features.8.bias",
+            "features.9.weight",
+            "features.9.bias",
+            "features.9.running_mean",
+            "features.9.running_var",
+            "features.9.num_batches_tracked",
+            "classifier.1.weight",
+            "classifier.1.bias",
+            "classifier.4.weight",
+            "classifier.4.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "max_parameter_diff_vs_valid_resume": 0.02451551891863346,
+          "global_rng_integrity": "ok"
+        },
+        "none": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "features.0.weight",
+            "features.0.bias",
+            "features.1.weight",
+            "features.1.bias",
+            "features.1.running_mean",
+            "features.1.running_var",
+            "features.1.num_batches_tracked",
+            "features.4.weight",
+            "features.4.bias",
+            "features.5.weight",
+            "features.5.bias",
+            "features.5.running_mean",
+            "features.5.running_var",
+            "features.5.num_batches_tracked",
+            "features.8.weight",
+            "features.8.bias",
+            "features.9.weight",
+            "features.9.bias",
+            "features.9.running_mean",
+            "features.9.running_var",
+            "features.9.num_batches_tracked",
+            "classifier.1.weight",
+            "classifier.1.bias",
+            "classifier.4.weight",
+            "classifier.4.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "max_parameter_diff_vs_valid_resume": 0.024515250697731972,
+          "global_rng_integrity": "ok"
+        },
+        "empty": {
+          "accepted": true,
+          "error": null,
+          "changed_model_state_keys": [
+            "features.0.weight",
+            "features.0.bias",
+            "features.1.weight",
+            "features.1.bias",
+            "features.1.running_mean",
+            "features.1.running_var",
+            "features.1.num_batches_tracked",
+            "features.4.weight",
+            "features.4.bias",
+            "features.5.weight",
+            "features.5.bias",
+            "features.5.running_mean",
+            "features.5.running_var",
+            "features.5.num_batches_tracked",
+            "features.8.weight",
+            "features.8.bias",
+            "features.9.weight",
+            "features.9.bias",
+            "features.9.running_mean",
+            "features.9.running_var",
+            "features.9.num_batches_tracked",
+            "classifier.1.weight",
+            "classifier.1.bias",
+            "classifier.4.weight",
+            "classifier.4.bias"
+          ],
+          "run_files_unchanged": false,
+          "resume_events": 1,
+          "max_parameter_diff_vs_valid_resume": 0.024515250697731972,
+          "global_rng_integrity": "ok"
+        }
+      },
+      "T04_hot_cache_recheck": {
+        "readonly": {
+          "x": {
+            "writeable": false,
+            "write_blocked": true
+          },
+          "y": {
+            "writeable": false,
+            "write_blocked": true
+          },
+          "rows": {
+            "writeable": false,
+            "write_blocked": true
+          }
+        },
+        "before": 95,
+        "after_rebuild": 95,
+        "equals_source": true
+      },
+      "input_validation": {
+        "over": {
+          "accepted": false,
+          "error": "像素解析失败：第 0 行存在超出 0–255 的值（min=1.0, max=256.0）",
+          "warnings": []
+        },
+        "negative": {
+          "accepted": false,
+          "error": "像素解析失败：第 0 行存在超出 0–255 的值（min=-1.0, max=1.0）",
+          "warnings": []
+        },
+        "fraction": {
+          "accepted": false,
+          "error": "像素解析失败：第 0 行第 0 个值不是整数（np.float32(1.5)）",
+          "warnings": []
+        },
+        "trailing_junk": {
+          "accepted": true,
+          "first_value": 1,
+          "warnings": [
+            "string or file could not be read to its end due to unmatched data; this will raise a ValueError in the future."
+          ]
+        },
+        "fractional_label": {
+          "accepted": true,
+          "input": 1.5,
+          "cached_label": 1
+        }
+      },
+      "T06_existing_runs": [
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42",
+          "eligible": false
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42",
+          "eligible": false
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42",
+          "eligible": false
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42",
+          "eligible": false
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42",
+          "eligible": false
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42",
+          "eligible": false
+        }
+      ],
+      "formal_budget_drift": {
+        "fixture": "actual seven-class MiniCNN and standard create_dataloaders; temporary 14/6/6 CSV; real complete checkpoint and history",
+        "source_verdict": "run-bound",
+        "formal_eligible": true,
+        "reasons": [],
+        "actual_lr": 0.01,
+        "actual_batch_size": 4,
+        "actual_seed": 11,
+        "actual_epochs": 1,
+        "stop_reason": null,
+        "declared_frozen_budget": {
+          "learning_rate": 0.0003,
+          "batch_size": 128,
+          "max_epochs": 90
+        },
+        "declared_seeds": [
+          42,
+          43,
+          44
+        ],
+        "data_sha_matches_freeze": false,
+        "frozen_loader_checks_passed": true,
+        "actual_csv_sha256": "9f2a54135eda6b909e78dcae096ea6ba104b02a19a858ae734d20ff173f7e936"
+      },
+      "formal_incomplete_checkpoint": {
+        "formal_eligible": true,
+        "checkpoint_fields": [
+          "partial"
+        ]
+      },
+      "additional_state_probes": {
+        "scale_0.0": {
+          "accepted": true,
+          "amp_scaler_integrity": "checked"
+        },
+        "scale_nan": {
+          "accepted": true,
+          "amp_scaler_integrity": "checked"
+        },
+        "backoff_factor_2.0": {
+          "accepted": true,
+          "amp_scaler_integrity": "checked"
+        },
+        "growth_interval_0": {
+          "accepted": true,
+          "amp_scaler_integrity": "checked"
+        },
+        "adam_empty_vs_valid": {
+          "steps_good": 8,
+          "steps_empty": 4,
+          "max_parameter_difference": 0.014577829279005527
+        },
+        "scheduler_next_fit": {
+          "succeeded": false,
+          "error": "TypeError('can only concatenate str (not \"int\") to str')",
+          "run_status": "failed"
+        }
+      }
+    },
+    "performance_and_fidelity": {
+      "scope": "Windows venv,4 CPU threads,real existing uint8-v2 cache; temporary fit2 performance runs only",
+      "full_cache_fidelity": {
+        "Training": {
+          "n": 28709,
+          "pixels_normalized_bitwise_equal": true,
+          "labels_equal": true,
+          "rows_equal": true,
+          "readonly_all": true
+        },
+        "PublicTest": {
+          "n": 3589,
+          "pixels_normalized_bitwise_equal": true,
+          "labels_equal": true,
+          "rows_equal": true,
+          "readonly_all": true
+        },
+        "PrivateTest": {
+          "n": 3589,
+          "pixels_normalized_bitwise_equal": true,
+          "labels_equal": true,
+          "rows_equal": true,
+          "readonly_all": true
+        }
+      },
+      "stat_calls_first_batch": {
+        "batch_size": 128,
+        "signature_calls": 384
+      },
+      "data_iteration": {
+        "real_stat_samples_s": [
+          2.719353600001341,
+          2.7078297000007296,
+          2.7553296999976737
+        ],
+        "no_repeat_stat_proxy_samples_s": [
+          0.2780906000007235,
+          0.27703590000237455,
+          0.27547170000252663
+        ],
+        "real_median_s": 2.719353600001341,
+        "proxy_median_s": 0.27703590000237455,
+        "reduction_pct": 89.81243557284209,
+        "n": 28709,
+        "proxy_not_deployed": true
+      },
+      "complete_fit2_flow": {
+        "current_samples_s": [
+          10.109907099998964,
+          10.21890540000095,
+          10.162735199999588
+        ],
+        "proxy_samples_s": [
+          4.1435010000022885,
+          4.153129799997259,
+          4.2092425000009825
+        ],
+        "current_median_s": 10.162735199999588,
+        "proxy_median_s": 4.153129799997259,
+        "reduction_pct": 59.13373990107085,
+        "includes": "factory + model/Trainer setup + two full Training epochs + correct PublicTest validation + checkpoint/history/meta saves",
+        "excludes": "full untimed warmup; no CSV/cache rebuild; cleanup after timing",
+        "pair_metrics": [
+          {
+            "current": {
+              "history": {
+                "train_loss": [
+                  1.2712554931640625,
+                  1.1102131605148315
+                ],
+                "val_loss": [
+                  1.0831295251846313,
+                  1.0874075889587402
+                ],
+                "val_acc": [
+                  0.3730844557285309,
+                  0.38172194361686707
+                ],
+                "lr": [
+                  0.0003,
+                  0.00029917828430524096
+                ]
+              },
+              "last_optimizer_steps": 448
+            },
+            "proxy": {
+              "history": {
+                "train_loss": [
+                  1.2712554931640625,
+                  1.1102131605148315
+                ],
+                "val_loss": [
+                  1.0831295251846313,
+                  1.0874075889587402
+                ],
+                "val_acc": [
+                  0.3730844557285309,
+                  0.38172194361686707
+                ],
+                "lr": [
+                  0.0003,
+                  0.00029917828430524096
+                ]
+              },
+              "last_optimizer_steps": 448
+            },
+            "max_history_difference": 0.0,
+            "max_state_difference": 0.0
+          },
+          {
+            "current": {
+              "history": {
+                "train_loss": [
+                  1.2712554931640625,
+                  1.1102131605148315
+                ],
+                "val_loss": [
+                  1.0831295251846313,
+                  1.0874075889587402
+                ],
+                "val_acc": [
+                  0.3730844557285309,
+                  0.38172194361686707
+                ],
+                "lr": [
+                  0.0003,
+                  0.00029917828430524096
+                ]
+              },
+              "last_optimizer_steps": 448
+            },
+            "proxy": {
+              "history": {
+                "train_loss": [
+                  1.2712554931640625,
+                  1.1102131605148315
+                ],
+                "val_loss": [
+                  1.0831295251846313,
+                  1.0874075889587402
+                ],
+                "val_acc": [
+                  0.3730844557285309,
+                  0.38172194361686707
+                ],
+                "lr": [
+                  0.0003,
+                  0.00029917828430524096
+                ]
+              },
+              "last_optimizer_steps": 448
+            },
+            "max_history_difference": 0.0,
+            "max_state_difference": 0.0
+          },
+          {
+            "current": {
+              "history": {
+                "train_loss": [
+                  1.2712554931640625,
+                  1.1102131605148315
+                ],
+                "val_loss": [
+                  1.0831295251846313,
+                  1.0874075889587402
+                ],
+                "val_acc": [
+                  0.3730844557285309,
+                  0.38172194361686707
+                ],
+                "lr": [
+                  0.0003,
+                  0.00029917828430524096
+                ]
+              },
+              "last_optimizer_steps": 448
+            },
+            "proxy": {
+              "history": {
+                "train_loss": [
+                  1.2712554931640625,
+                  1.1102131605148315
+                ],
+                "val_loss": [
+                  1.0831295251846313,
+                  1.0874075889587402
+                ],
+                "val_acc": [
+                  0.3730844557285309,
+                  0.38172194361686707
+                ],
+                "lr": [
+                  0.0003,
+                  0.00029917828430524096
+                ]
+              },
+              "last_optimizer_steps": 448
+            },
+            "max_history_difference": 0.0,
+            "max_state_difference": 0.0
+          }
+        ],
+        "proxy_not_deployed": true,
+        "preserved_real_artifacts": true,
+        "proxy_routes_by_official_split": true,
+        "all_pairs_history_and_model_state_match_within_1e-5": true,
+        "invalid_initial_proxy_flow_discarded": true
+      },
+      "public_prediction_equivalence": {
+        "mini_cnn": {
+          "n": 3589,
+          "max_probability_difference": 0.0,
+          "predictions_equal": true,
+          "labels_equal": true
+        },
+        "vgg_lite": {
+          "n": 3589,
+          "max_probability_difference": 0.0,
+          "predictions_equal": true,
+          "labels_equal": true
+        },
+        "micro_resnet": {
+          "n": 3589,
+          "max_probability_difference": 0.0,
+          "predictions_equal": true,
+          "labels_equal": true
+        }
+      },
+      "batch_augmentation128_ms": {
+        "samples": [
+          1.6775000003690366,
+          1.6629000019747764,
+          1.3170999991416465,
+          1.8534999981056899,
+          1.2950999989698175,
+          1.3703999975405168,
+          1.2924000002385583
+        ],
+        "median_ms": 1.3703999975405168
+      }
+    },
+    "findings": {
+      "U01": {
+        "title": "U01 · P1 · “完整恢复”仍接受缺失或无效的关键状态（T03 / F09）",
+        "severity": "P1",
+        "category": "correctness",
+        "source_locations": "[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:327)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:377)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:410)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:454)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:534)。",
+        "problem_and_evidence": "预检已拦截原来的 loader RNG 缺项，但“能设置/能转换类型”不等于完整、合法的训练状态。以下操作都仅针对临时完整断点：\n\n| 无效状态 | 当前行为及影响 |\n|---|---|\n| GPU MiniCNN（dropout=0.3）的 CUDA RNG 删除、None 或空列表 | 都被接受，global_rng 标为 ok；再训练一轮与合法恢复最大参数差约 **0.0245155** |\n| 已有 4 次 FP32 更新的 Adam state 改为 {} | 接受并丢失动量/步数；继续后累计 step **4**，合法恢复为 **8**，最大参数差 **0.0145778** |\n| 删除 history / best / early_stop_state | 都被接受；缺 history 时 start_epoch=2 但历史为空，best/早停状态则回到默认值 |\n| scheduler.last_epoch 改为字符串 | 预检及加载成功，下一次 fit 因字符串加整数报错，run 变 failed |\n| AMP scale=0/NaN、backoff_factor=2、growth_interval=0 | 都被接受并标为 checked；只转换 float/int 没有验证有效范围 |",
+        "fix_plan": "按来源设备和实际组件声明必需状态，核验 CUDA RNG 的设备映射/数量及每份状态，禁止使用缺失/空状态冒充恢复。模型/优化器保存实际更新数，与 state、history、epoch、best、早停进度交叉验证；区分初始零更新、AMP 全部跳步等合法空状态。调度器验证完整动态进度，scaler 检查有限正 scale、growth_factor>1、0<backoff_factor<1、正整数 interval 和合法 tracker，而不只是类型转换。旧断点缺乏必要字段时明确拒绝精确续训或迁移为独立非精确 run。",
+        "acceptance_criteria": "将表中每个反例固化为回归，全部在真实状态/原文件改变前拒绝，不写成功恢复事件。合法 CPU/GPU、AMP OFF/ON、无 scheduler、零更新/跳步断点不误拒；连续/恢复在逐批输入、模型/BN、optimizer/scaler/scheduler、RNG、完整 history 与早停触发上匹配。GPU dropout 测试必须覆盖 CUDA RNG 的删除、None、空列表、错误数量及坏 Tensor。",
+        "status": "未通过；正式使用精确续训前补齐。"
+      },
+      "U02": {
+        "title": "U02 · P1 · 预检未覆盖真实加载错误，拒绝后模型已经改变（T03 / F09）",
+        "severity": "P1",
+        "category": "correctness",
+        "source_locations": "[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:443)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:461)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:510)。",
+        "problem_and_evidence": "模型检查只在双方都是 Tensor 时比较形状；优化器只比 param_groups 数量，没比每组参数数目。将临时模型最后一个 bias 的值改为字符串，预检放行，真实 load_state_dict 报错之前已写入前面的 weight。将优化器一组 params 删掉一个，预检放行，加载模型后才因参数组大小不匹配报错，weight/bias 都已改变。两例文件和恢复事件未改写，但真实 Trainer 已不是加载前状态，Jupyter 中继续使用会带入未登记权重。",
+        "fix_plan": "模型逐键验证类型、形状和所需数值约束，优化器校验各组参数数量、ID 映射、state 键和对应张量。恢复先在隔离对象上完成实际 dry-run，或设计带完整备份的事务式提交；模型、优化器、scaler、调度器、RNG、history 任一步失败均恢复原状，成功后再记录事件。只读预检不能用部分形状检查代替真正可恢复性检查。",
+        "acceptance_criteria": "坏 Tensor 类型、末尾键错误、每组参数增删、非法 state ID/形状分别覆盖，断言拒绝前后模型/BN、优化器、调度器、scaler、CPU/CUDA RNG、history 及原 run 文件均相同。用真实 MiniCNN 补集成回归；合法断点和 partial→last 回滚仍通过，不因预检额外消费全局 RNG。",
+        "status": "未通过；“失败不改真实状态”的承诺尚不成立。"
+      },
+      "U03": {
+        "title": "U03 · P1 · 正式准入只绑定标记文件，没有验证实际方案和完整断点（T06 / F07 / F11）",
+        "severity": "P1",
+        "category": "correctness",
+        "source_locations": "[training/train.py](D:/Document/Unniversity/emotion_recognition/training/train.py:40)、[utils/comparison_check.py](D:/Document/Unniversity/emotion_recognition/utils/comparison_check.py:302)、[utils/comparison_check.py](D:/Document/Unniversity/emotion_recognition/utils/comparison_check.py:330)。",
+        "problem_and_evidence": "冻结文件当前只要求 id/日期/commit，加载与准入不检查实际配置、数据和完成预算。临时七分类 MiniCNN 使用标准数据工厂和完整 checkpoint/history，来源校验为 run-bound；冻结记录声明 LR=3e-4、batch=128、上限90、seeds=42/43/44 和官方 CSV SHA，但实际 LR=0.01、batch=4、seed=11、只训练1轮且没有早停，数据 SHA 也不同，仍得到 formal_eligible=true、reasons=[]。把 last 换成仅含 partial=false 的字典，准入仍为 true。现有正例测试同样用这种最小字典，无法证明“完整合法 run”。",
+        "fix_plan": "冻结实际可执行方案：配置快照/规范化摘要、模型/臂、允许 seeds、数据/划分指纹、增强版本、预算和完成规则；读取并核对协议 id 与内容，不只比较标记文件 SHA。formal 启动、续训、最终汇总分别校验实际设置。区分“会话结束”和“实验完成”：短会话未到预算且无允许的早停原因时保持未完成，超预算也拒绝。准入必须验证 last/best 的完整 schema、模型/run/数据/协议与 history/meta 绑定，源文件缺失或坏权重不能只靠 partial=false 放行。",
+        "acceptance_criteria": "改 LR/batch/seed/数据、错误协议 id、未达预算且无早停、超预算、缺模型状态、其他 run 的 last/best 均被拒绝或排除。合规分次训练尚未完成时不进入汇总，达到预算或允许的早停后才准入。用真实完整产物替代当前正例最小字典；来源绑定和准入两个阶段同时测试。三个模型及各臂/seed 的正式结果都能追到同一冻结方案及其允许差异。",
+        "status": "未通过；冻结与正式训练入口仍需完善后再开始正式实验。"
+      },
+      "U04": {
+        "title": "U04 · P2 · 非整数标签和像素字符串尾部垃圾仍被静默接纳（T04 / F10）",
+        "severity": "P2",
+        "category": "correctness",
+        "source_locations": "[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:112)、[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:140)。",
+        "problem_and_evidence": "像素 256、-1、1.5 的原反例已拒绝。但标签先转 int64 再验范围，临时 CSV 的 emotion=1.5 被缓存为标签1。2304 个合法像素后追加 junk，np.fromstring 返回2304个值并发出警告，构建逻辑仍接受。当前官方 CSV 的全量合法数据已通过保真核验，这些是非法输入防护缺口，不表示原数据被污染。",
+        "fix_plan": "转型前验证标签有限、整数性和 0–6 范围，错误注明原行号。像素解析必须确认消费完整字符串；可将截断解析警告转为异常或使用等价的严格词元校验。先完成输入验证再发布缓存，不能把截断结果写成“合法数据”。",
+        "acceptance_criteria": "小数/负小数/非有限/越界标签、像素尾部垃圾和中间坏词元全部拒绝，合法尾部空白、0/255 和整数标签通过。三划分全量像素归一化、标签、原行号和指纹继续与旧路径一致；缓存构建失败不覆盖原有效 meta，热加载不重复字符串校验。",
+        "status": "部分通过；正式合法数据保真已通过，非法输入边界待补齐。"
+      },
+      "PB06": {
+        "title": "PB06 · 优化顺序 1 · 逐样本文件签名检查成为新的训练瓶颈",
+        "severity": null,
+        "category": "performance",
+        "source_locations": "[data/dataloader.py](D:/Document/Unniversity/emotion_recognition/data/dataloader.py:134)、[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:428)。",
+        "problem_and_evidence": "每次 __getitem__ 都调用 get_memmap_split，热路径对 x/y/rows 各 stat 一次。真实128张批次触发 **384 次签名检查**，Training 一轮28,709张约86,127次。仅工厂/句柄热加载约0.0003秒无法反映这一开销。CPU4线程、默认workers=0、已存在缓存，3组配对：\n\n| 测量 | 当前实现中位数 | 临时复用数组代理 | 说明 |\n|---|---:|---:|---|\n| 完整 Training 取数一轮 | 2.719 s | 0.277 s | 不含增强/GPU/验证/保存；耗时 -89.8% |\n| MiniCNN 完整两轮短流程 | 10.163 s | 4.153 s | 含工厂、模型/Trainer初始化、训练、正确 PublicTest 验证和保存；耗时 -59.1% |\n\n第二项经过完整预热，3组交替配对，代理按官方 split 路由，训练历史与最终模型/BN状态最大差均为0，Adam累计有效更新均448（两路径一致；未把批次数当作有效更新数）。最初错误路由验证缓存的对照已丢弃，不用于结论。代理跳过重复签名校验，仅用于归因，未部署且不能作为保留完整性保护的最终方案；59.1%不是修复后的加速保证，也不外推到三模型/90轮长期训练。",
+        "fix_plan": "把安全校验提升到批级读取入口，例如实现 Dataset.__getitems__，每批打开/取数组前后校验来源版本和三份文件签名，再按同一索引顺序逐样本处理，维持增强/采样/RNG语义。结合不可变缓存代际文件、原子 meta 和已固定的数据指纹，变化时拒绝当前训练，不默默重建并切换来源。保留冷打开 SHA 核验及 T04 的损坏检测，不直接删除保护；复测 workers=0/2/4 后选择默认值。",
+        "acceptance_criteria": "所有 T04/U04 回归通过，运行中换/删/改 x/y/rows 能在下批训练更新前拒绝；同种子采样/增强的输入、模型/BN、优化器/scaler及验证输出匹配。签名检查随批次数增长而非样本数，128张不再做384次。相同配置至少3组完整加载→训练→验证→保存配对，建议总耗时中位数改善≥10%；记录首轮/后续轮、取数/增强/GPU/验证/保存、峰值内存与至少100批真实P95，不用工厂时间或无校验代理替代完整性能验收。",
+        "status": "瓶颈已确认；安全优化尚未实施。"
+      }
+    },
+    "protected_artifacts": {
+      "file_count": 122,
+      "unchanged": true,
+      "files": [
+        {
+          "path": "analysis\\benchmark_amp\\results.json",
+          "sha256": "99fc88c1e4ca6b70d7f8366d2d54db959774dd92540e30c97fa087d82196af07"
+        },
+        {
+          "path": "analysis\\class_distribution.png",
+          "sha256": "16a25d004d8cae6367925db74ea7768316080f7b691e591a9b911ea27dedd991"
+        },
+        {
+          "path": "analysis\\comparison_confusion_matrices.png",
+          "sha256": "9efb13960caae3b05675e39a27b4a3e70e8e20615a9f48b59d7fff94f72d4984"
+        },
+        {
+          "path": "analysis\\comparison_param_efficiency.png",
+          "sha256": "7f2c0577505146993cb672f6089af1e7aa9e7348f11bcc88c1e684ddf3324c51"
+        },
+        {
+          "path": "analysis\\confusion_matrices\\micro_resnet_cm.png",
+          "sha256": "9d08f78e7adb52bcc7b585d0d9497aa1130ab7398a96745a77aa9ae98f8c8901"
+        },
+        {
+          "path": "analysis\\confusion_matrices\\mini_cnn_cm.png",
+          "sha256": "31a5adc8f282509d078159c99df1da044003f99b05763f039ca19f26d3a74224"
+        },
+        {
+          "path": "analysis\\confusion_matrices\\vgg_lite_cm.png",
+          "sha256": "a1e6567a053487db934066a206b1c0fa5ded378669da3049caabfe80cf5edd44"
+        },
+        {
+          "path": "analysis\\data_audit.json",
+          "sha256": "ac38786336ba2a8d2eacc2c76512a02a3fb0ef2c473134ae36d6c0f3f2b0d85e"
+        },
+        {
+          "path": "analysis\\efficiency_results.json",
+          "sha256": "06ec3a521aeded249d4e195e51b28300aa19786200866a023b065955b187054b"
+        },
+        {
+          "path": "analysis\\evaluations\\audit2_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "d8e6a15f468df57279274bee847c8a7af49fe87bdfb84d47ae0f9e396bbe33f5"
+        },
+        {
+          "path": "analysis\\evaluations\\audit2_mini_cnn_PublicTest\\summary.json",
+          "sha256": "8271f019a24107ca42c8fe2ffb862bf90ba47f3edafb808e91321245618cb557"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_micro_resnet_PrivateTest\\predictions.csv",
+          "sha256": "370bd3f21705ada7bd3818831adaf1db8241d79b7367fd50b33b6426677e025b"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_micro_resnet_PrivateTest\\summary.json",
+          "sha256": "f6639abba1668171d0489c69ebf74b2054986852ad14043a77c390fbc81485f3"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_mini_cnn_PrivateTest\\predictions.csv",
+          "sha256": "58d437c5624a35c60ea69cc2dde7a3b9feccfd700e1ac11c174c0d432e55f9d1"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_mini_cnn_PrivateTest\\summary.json",
+          "sha256": "5dfb2713ff15e1e88dcfa298e0ce23cad970dced2319b8c5896fa1a0c2216433"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_vgg_lite_PrivateTest\\predictions.csv",
+          "sha256": "78049157e5b8f37d71f7d0304b62573f62b749837e713951dbdd1c250ffd24a0"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_vgg_lite_PrivateTest\\summary.json",
+          "sha256": "5946772eb060f80dcb2eb63bbbe52b448a8244304e455b30746c7371194f5572"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PrivateTest\\predictions.csv",
+          "sha256": "370bd3f21705ada7bd3818831adaf1db8241d79b7367fd50b33b6426677e025b"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PrivateTest\\summary.json",
+          "sha256": "246cb625399cee441f43aec355917cc8d6089a34cb100ce0b585423ec7bf41ef"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PublicTest\\predictions.csv",
+          "sha256": "eb9428307e5affe3906fbef5c587cce7336f89d9ef4cc67ca832abce4cba2f22"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PublicTest\\summary.json",
+          "sha256": "aa9e0af6741ca0bafcd133ad7b0c00b310cacc184b41abdf4308caf721239dfd"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PrivateTest\\predictions.csv",
+          "sha256": "58d437c5624a35c60ea69cc2dde7a3b9feccfd700e1ac11c174c0d432e55f9d1"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PrivateTest\\summary.json",
+          "sha256": "d232fdb00404b79b1545cfbb9e61b56a8fcde85d4aa30dab496957b7188e7ff0"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "f458033fbf5e7aec4b48dd2a4b685802b06995d6119879a5a0af00cad39078dc"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PublicTest\\summary.json",
+          "sha256": "2e62fa6ebfd45117fe6c7aa09df4a85b45188723ccb72934e75fe6bfcd54b813"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PrivateTest\\predictions.csv",
+          "sha256": "78049157e5b8f37d71f7d0304b62573f62b749837e713951dbdd1c250ffd24a0"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PrivateTest\\summary.json",
+          "sha256": "aa7156ea0101a2ddeced532ec5d05f52f46611045f17ccb8281956783be2d173"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PublicTest\\predictions.csv",
+          "sha256": "bb2c5fd317e52804d1d4f0bd6e02864bd4cffd9199e08d8ea66877d0df41c29d"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PublicTest\\summary.json",
+          "sha256": "6a4ca260b0f02654101f638c1d1f9c2d4dac565484990abd9efe51e7652b7b77"
+        },
+        {
+          "path": "analysis\\evaluations\\loop2_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "1bd0275aa096bcaff023e32240743c16bcb148d8a46091c2ee48ca7e4900fcd4"
+        },
+        {
+          "path": "analysis\\evaluations\\loop2_mini_cnn_PublicTest\\summary.json",
+          "sha256": "5e9f9d19d6506bef652d9c31f5319a4111cd217bf2aa98342a57b1baeced41a3"
+        },
+        {
+          "path": "analysis\\evaluations\\smoke_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "a46d880b05485f4991356559208a91778786b03038f2e1ef59559efdd58b8019"
+        },
+        {
+          "path": "analysis\\evaluations\\smoke_mini_cnn_PublicTest\\summary.json",
+          "sha256": "ed8cb931fb10ce0866affc55527890a68fa16f91de5d8bd38a467eafd0d24212"
+        },
+        {
+          "path": "analysis\\evaluations\\summary_legacy_models.json",
+          "sha256": "f72301829ac99a729dbc2a6779fb774c23d3b7244801f786e1642b96d5e89e34"
+        },
+        {
+          "path": "analysis\\roc_curves\\micro_resnet_roc.png",
+          "sha256": "0722517d23f3ccfeb861f76147da5b5826bc844a2aeb63cbf518a2bb8ecbf832"
+        },
+        {
+          "path": "analysis\\roc_curves\\mini_cnn_roc.png",
+          "sha256": "058a88becf5f374f020425ff256f39eff90bb7d2f7e864ffd9323de0ab316d40"
+        },
+        {
+          "path": "analysis\\roc_curves\\vgg_lite_roc.png",
+          "sha256": "57c9e77212ad440073afc5b55d5510061a445881ae49e6ddb6a375b07a0f95ee"
+        },
+        {
+          "path": "analysis\\sample_visualization.png",
+          "sha256": "ee942a3382f93cdc78ad32ebd2ba1aebf86a8eca360db39eec7894a16a1d085d"
+        },
+        {
+          "path": "analysis\\training_curves\\comparison_training_curves.png",
+          "sha256": "1094dc9c829bdde3e336a8ef2d87ee2129948ab98402616a77c14216358855fb"
+        },
+        {
+          "path": "analysis\\training_curves\\micro_resnet_training_curves.png",
+          "sha256": "51c6fad71fb918b70d0f921babb864abc232f1c57662262f88f957bcd98dc5a2"
+        },
+        {
+          "path": "analysis\\training_curves\\mini_cnn_training_curves.png",
+          "sha256": "7f0695b0f8041af9c6b12b075544f056aa342b78fef02dc4967ace44821bb995"
+        },
+        {
+          "path": "analysis\\training_curves\\vgg_lite_training_curves.png",
+          "sha256": "a979b597bd7ebccd949e154353569c78ece8d6858476b5e2167ab5fc3249d218"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\meta.json",
+          "sha256": "497bbd1844217e781a906fc2c6fa031ae86aa73f8d9c2e521d3537c1a9414f24"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PrivateTest_rows.npy",
+          "sha256": "657608256d18c85b1b5528e892be0766033cea70ef788c017512db746169fd82"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PrivateTest_x.npy",
+          "sha256": "6ffc500dcedd385c750be21bb2a31c2e5d1f62a50192ff9002442c9ba7f959b1"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PrivateTest_y.npy",
+          "sha256": "b0a750c7f043a7defbf5c67fb69c908a489e50fe44a0abc7cb54d3e33e54f8af"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PublicTest_rows.npy",
+          "sha256": "ff7223c7ae1ba367312e6097ef60a014e35caed488241842c24aa4132254f036"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PublicTest_x.npy",
+          "sha256": "2ab06a0f1f661976a0d86208cb69d380059e4b9448fc1c64a854107cdc4e57b0"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PublicTest_y.npy",
+          "sha256": "fae9e4df7c2b4b98aa697170116e5d24c70cbc186f51b369756a12392fc67606"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\Training_rows.npy",
+          "sha256": "b99e12f1f3819b6da6515403e2271fa79b8c2f9dfc4a6e05a10c39047976911b"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\Training_x.npy",
+          "sha256": "604d6678861894ac6baf26b461eb42749383bce77d816b42544b2711b7144453"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\Training_y.npy",
+          "sha256": "bf88db1d6673100a3a01d98df21adddf0ee53c7c0950b0f27106a587a7577395"
+        },
+        {
+          "path": "data\\fer2013.csv",
+          "sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b"
+        },
+        {
+          "path": "inference\\saved_models\\export_manifest.json",
+          "sha256": "8a5f5bbdd1e9eade4163f1a078abe8743a2c60bb7f6d46b444d3b9a0ff3ddc04"
+        },
+        {
+          "path": "inference\\saved_models\\micro_resnet_best.pth",
+          "sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_20261007_022921_seed42.pth",
+          "sha256": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_20261007_031251_seed42.pth",
+          "sha256": "5928c68c9fe486899f32f71c8d3d71a49e5ae98eca487a0a95faaacf5efb4aad"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_20261007_041818_seed42.pth",
+          "sha256": "5887d3158a1bdd9c1902c1daab0d86e0523db90a3d535e20b8ca0bf10ee77888"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_best.pth",
+          "sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb"
+        },
+        {
+          "path": "inference\\saved_models\\vgg_lite_best.pth",
+          "sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7"
+        },
+        {
+          "path": "report&ppt\\人脸情绪识别系统课程报告.docx",
+          "sha256": "846ff0d2357045101cfd8c8f7277ab17354173b7c8f1e6465b46008e905c5cd9"
+        },
+        {
+          "path": "report&ppt\\人脸情绪识别系统课程报告.pptx",
+          "sha256": "56060c1c8c952a4a8c6b676b974bfc567720e6f70dcdd896e98a8b43c0df3ed9"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch090_20260526_234029.pth",
+          "sha256": "f9a3a094e8def718963c1dfeb15808c092be9c90e5f16e3577c5e216bbc221a8"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch090_20260526_234623.pth",
+          "sha256": "66e1f0f54ee5872788e942033e49a2f76cebebc9cf924c2929f8474e68e4d821"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch095_20260526_234645.pth",
+          "sha256": "13f4eec8d4a270835c90db7990c741860cf623a66432784523b08861a7a99a35"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch100_20260526_234713.pth",
+          "sha256": "ae2c86e8e2cac0c11884d330ad2419c87eec9e9d42e7dd400e633643702dc159"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch105_20260526_234743.pth",
+          "sha256": "7e2ca847f89708a1aedb2b67bde80ffd8453ecf21ff202055aad175001eb5192"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\global_best.pth",
+          "sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch001_20260515_174039.pth",
+          "sha256": "0c95f798d714a3652b22ecd748ca9017e49dad07c536713b99d573802424fa33"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch003_20260517_185418.pth",
+          "sha256": "fb907ab2afb5ad06403dac01fc998ac6509b23f77cf73c6ea97b936e5b913f4d"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch006_20260517_180234.pth",
+          "sha256": "61f986ee3cc1e5c64e10fd21cacb454a812540c875145f31157ff3feb0513502"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch087_20260517_184023.pth",
+          "sha256": "675f75effb81985e811e910608dc915fe4ef6f2ecd554cc66058db6c55de0a1d"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch090_20260518_145234.pth",
+          "sha256": "c2257aab50ad19ad5de70ecd758fbf46e4ca78a85581d79eb5619fe650c13e3d"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\local_best.pth",
+          "sha256": "92a62faf2ac75014da3882e88e4905434ec9b2dba99b7db0f822b611ad8b2cc8"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch040_20260520_164954.pth",
+          "sha256": "2929ec0108b3d4934d97ac84ae1c873389bc102608a383e88b9dcd402b7265de"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch045_20260520_165015.pth",
+          "sha256": "1e4f4173be7b50611025bc944332017766add08479a2d9fe6c04a27249e1ba7c"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch050_20260520_165036.pth",
+          "sha256": "90de2cf2613ba3b3c93e678b79aefd3f2d449033de9734f2bd2d50e975528ac8"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch055_20260520_165056.pth",
+          "sha256": "0a70a97d5af53c03da7b48a3dab440a6618e36d887ad93e1116eb4c80712cbbe"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch060_20260520_165117.pth",
+          "sha256": "7fdd812a40a4013749e86adb7fae602dc88b2255828e6c384242504626db9387"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\global_best.pth",
+          "sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\local_best.pth",
+          "sha256": "5245051511101ce461f8b097eb64fd9daf8e00ef6e716dbed40152c248add637"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch110_20260519_233113.pth",
+          "sha256": "8ac1c971107cbf8ef68703f7a9617da6ba00f292aed54e498e7e84693fbdadf0"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch115_20260519_233136.pth",
+          "sha256": "2470900972d75c326f113219a9d10241488c07501f74ac4fd20bfccd9c1cecca"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch120_20260519_233200.pth",
+          "sha256": "3f880ba0dcb7ae83eac37d1f1bb2c05ed1ae588376f0d7674e83a39ef378e383"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch125_20260519_233223.pth",
+          "sha256": "3230f8bccbf7170efb92bb40d2edd63602c739991183ad09235b4e52fb939998"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch130_20260519_233246.pth",
+          "sha256": "5af9db2d5f3b80b895117243bff534afbd681500975a918eea26d2a9889e963c"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\global_best.pth",
+          "sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\local_best.pth",
+          "sha256": "4ba56240fdb446197c56d3cbde8d2255345ce0a5f805efbbdec33d5bf9a4b962"
+        },
+        {
+          "path": "training\\logs\\micro_resnet\\history.json",
+          "sha256": "958892a42800c694a595fb8b0996021530c2e4111677c76bd7d1293dc9928f27"
+        },
+        {
+          "path": "training\\logs\\mini_cnn\\history.json",
+          "sha256": "2f5e56c9bc870c1a1ae0bcbdfd52e8b99ca772d98ce862687152e982bb4cca74"
+        },
+        {
+          "path": "training\\logs\\vgg_lite\\history.json",
+          "sha256": "e7bdefc3314274a8b16e02ebd30d69f415bc2517ea9654e89e750652b4cf5132"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\best.pth",
+          "sha256": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\last.pth",
+          "sha256": "0f3719393f87d033bee5b2d1189a651cfd42bd54855401be8796d9d50b59f682"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\config_effective.yaml",
+          "sha256": "8a26ce2d04c82748fdd62e4b411f016e9e1a11b097b31b27999b5a8f9de66620"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\history.json",
+          "sha256": "c1c1429b990fc961850a0b51e31adaa0a3451cc4c32877de33fb7e02bf53d4cc"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\run_meta.json",
+          "sha256": "7afc8ab17b278cb0b28e8c3dbabd58fac4bc388130ab98bea292e457945cbc3d"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\checkpoints\\best.pth",
+          "sha256": "5928c68c9fe486899f32f71c8d3d71a49e5ae98eca487a0a95faaacf5efb4aad"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\checkpoints\\last.pth",
+          "sha256": "6fe8191eaad7b86f7a3c6e5ffafabac9d0c9e5c78ba5fdc54ac7063a2a44c24b"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\config_effective.yaml",
+          "sha256": "8a26ce2d04c82748fdd62e4b411f016e9e1a11b097b31b27999b5a8f9de66620"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\history.json",
+          "sha256": "3d677f11031850d176f61e3ef4f396f285412a80af6706694ef2730675893556"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\run_meta.json",
+          "sha256": "80d2d716c83f80bd5020ef8a657eb0cd67c38893938e77d06888e189300526d9"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\checkpoints\\best.pth",
+          "sha256": "5887d3158a1bdd9c1902c1daab0d86e0523db90a3d535e20b8ca0bf10ee77888"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\checkpoints\\last.pth",
+          "sha256": "8e1c7649d29856177fd1333be2b4b57d0c609877e7233dbb4e0be6c217c465ae"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\config_effective.yaml",
+          "sha256": "2b9fb81e1e79c67bf9370a0f349e53312ac5f006ee6aa2694cd368c9a8bc12ca"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\history.json",
+          "sha256": "a4a6c45dda18db5ec79af0f61efa1652510d5b2c419bfeaff688d21069ab59a6"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\run_meta.json",
+          "sha256": "23e5d1457a0a16b1ecb6cb7f81b10026ec7e7c5f9bb1a3b0a920060b4a782b2c"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\checkpoints\\best.pth",
+          "sha256": "43ba24d49aff4e38d076ac0109af4faac8ae329bdd845d1b5881b4a89996d860"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\checkpoints\\last.pth",
+          "sha256": "06686de707fa37b48c9aec7cc579e9966b36e9fd76b6b50198ec1521d840f33f"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\config_effective.yaml",
+          "sha256": "e78d1194d675f86e7b07dafecd1c4d2e562b48a3265c98f2486a8703990c1185"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\history.json",
+          "sha256": "d883deceace5dfa54547a77650b57d24b6d6d229d28e7c7e25ffff50ee241685"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\run_meta.json",
+          "sha256": "370f3b8d74647bd299dbf930ccbbefd8bbfa41bdfd4eeead9eb7ad26d9349e62"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\checkpoints\\best.pth",
+          "sha256": "af460f95651d97e908954c325ea29e1e66412845da12204c5ed5f1963f2440a1"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\checkpoints\\last.pth",
+          "sha256": "d884edce5970eb225218706decff2da825dbe0ef8743327775f10dc00a832d9e"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\config_effective.yaml",
+          "sha256": "37a07de11dda38d5069f5024be818eb12a12aea8195a6e3c77c428125cba98ff"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\history.json",
+          "sha256": "c439446b531c0f1c71de2fac99ea1c7d852fcc66be6ced52920bae7ced5fad37"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\run_meta.json",
+          "sha256": "fb2f85e7b2c23d4f26a27d244bdb053fe6c5e7d8f64092db95d1daedcc2d4264"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\checkpoints\\best.pth",
+          "sha256": "312bd31b7441d2a7cf48c87057e41adb101580298a63b567568bfa5afd85ec9c"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\checkpoints\\interrupted_epoch002_e2e.pth",
+          "sha256": "35391987d88d1b55c9a63f6ff74bab9c098ca90576116066949d8fa6a16eddd9"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\checkpoints\\last.pth",
+          "sha256": "f64532302e14e7125010456a2c2c1a8a3af81b17348fb9ac162a2f2c89628611"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\config_effective.yaml",
+          "sha256": "e78d1194d675f86e7b07dafecd1c4d2e562b48a3265c98f2486a8703990c1185"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\history.json",
+          "sha256": "a8c52f5e9445bc82ffa5c04e4df610f8460dadb91252331139841cfd6e682c20"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\run_meta.json",
+          "sha256": "ff0c9be58236031dd54928f41829a3a69e7346e79b18ca281df80baf80156ae7"
+        }
+      ],
+      "scope": "Original CSV, all cache files, training runs/checkpoints/logs, exported weights, analysis artifacts, course DOCX/PPTX"
+    },
+    "protected_files_verified_after_document_writes": true,
+    "actions": {
+      "application_code_modified": false,
+      "tests_modified": false,
+      "formal_training_rerun": false,
+      "formal_protocol_created": false,
+      "new_weights_exported": false,
+      "report_docx_or_ppt_modified": false,
+      "new_research_question_or_model_or_dataset": false,
+      "personal_contribution_checklist_added": false,
+      "python_environment": "Project Windows .venv only",
+      "temporary_outputs": "Synthetic fixtures, temporary actual MiniCNN runs, probes and benchmark outputs were isolated in system temp",
+      "temporary_artifacts_cleaned": true
+    },
+    "limits": [
+      "Existing test suite passing does not cover the independent U01-U04 counterexamples",
+      "State corruption/load-error probes include simple toy models; T01, CUDA RNG, Adam trajectory, and formal-plan drift additionally use actual MiniCNN",
+      "Formal-plan drift uses a temporary frozen fixture and tiny CSV; no actual frozen protocol or formal FER2013 experiment was created",
+      "PrivateTest was used only for cache pixel/label/row fidelity, never model tuning or temporary training evaluation",
+      "Stat-skipping proxy is diagnostic, bypasses integrity protection, and is not a deployed safe optimization",
+      "Invalid initial full-flow proxy routed validation incorrectly; discarded. Retained corrected pairs route by split and match history/model states",
+      "No fresh browser end-to-end P95, no long-run multi-seed accuracy claims"
+    ],
+    "protected_files_verified_after_cleanup": true,
+    "documents_updated": [
+      "PROJECT_REVIEW.md",
+      "PROJECT_REVIEW_EVIDENCE.json",
+      "README.md",
+      "docs/comparison_protocol_draft.md"
+    ]
+  },
+  "fourth_audit_remediation": {
+    "completed_on": "2026-10-07",
+    "base_commit": "6610651cfd50d7e8e5645543b788c15e322c3a7b",
+    "worktree_changes": true,
+    "code_sha256": "a9b05cc1e4abf55561513216f09df491b37c5fdd0700fe7fbc95fa32990dce71",
+    "resolved_issue_ids": [
+      "U01",
+      "U02",
+      "U03",
+      "U04",
+      "PB06"
+    ],
+    "verdict": "requested_fixes_accepted_formal_experiments_pending",
+    "quality": {
+      "pytest": {
+        "passed": 285,
+        "warnings": 7,
+        "elapsed_s": 99.77,
+        "exit_code": 0
+      },
+      "formal_and_commit_recheck": {
+        "passed": 15,
+        "elapsed_s": 9.49,
+        "exit_code": 0
+      },
+      "cuda_rng_scaler_recheck": {
+        "passed": 2,
+        "elapsed_s": 3.75,
+        "exit_code": 0
+      },
+      "ruff": {
+        "exit_code": 0
+      },
+      "mypy": {
+        "source_files": 47,
+        "exit_code": 0
+      },
+      "pip_check": {
+        "exit_code": 0
+      }
+    },
+    "implementation": {
+      "U01": "v3 required update/attempt records, per-epoch progress, CUDA RNG cardinality, history/best/early-stop/scheduler/optimizer/scaler validation; zero-update and actual AMP all-skip accepted",
+      "U02": "tensor/dtype/shape and param-group/ID/options validation; transaction restores all live state and exact metadata bytes after late load/commit errors",
+      "U03": "schema-v1 executable plans + source/config byte digest + >=3 seeds; actual plan/data/runtime binding at startup/resume/admission; session_completed separated; genuine last/best/config/history/meta verified",
+      "U04": "finite integer label validation before cast; float64 full pixel parse with truncation warnings as errors; failed build retains valid meta",
+      "PB06": "batch __getitems__ before/after checks, immutable cache generation, CSV/meta signatures, main-process check before consumption and optimizer update"
+    },
+    "test_regressions": {
+      "new_cases": 52,
+      "file": "tests/test_fourth_fixes.py",
+      "upgraded_old_positive_fixtures": "Real fit progress replaces manually inconsistent history/best; minimal fake formal checkpoint is now negative; rebuild asserts current immutable generation"
+    },
+    "performance": {
+      "baseline": "HEAD 6610651 dataset/factory, same current Trainer/checkpoint save in both paths",
+      "scope": "Windows venv, CUDA, four CPU threads, default config, actual cache, no rebuild, all output temp",
+      "safe_optimized_path": true,
+      "complete_two_epoch_pairs": [
+        {
+          "old_s": 10.074480299997958,
+          "new_s": 4.536326899997221,
+          "max_model_bn_difference": 0.0,
+          "max_history_difference": 0.0,
+          "optimizer_updates": 448,
+          "optimizer_attempts": 450
+        },
+        {
+          "old_s": 10.311690699996689,
+          "new_s": 4.489425700001448,
+          "max_model_bn_difference": 0.0,
+          "max_history_difference": 0.0,
+          "optimizer_updates": 448,
+          "optimizer_attempts": 450
+        },
+        {
+          "old_s": 10.317195999999967,
+          "new_s": 4.6237885000009555,
+          "max_model_bn_difference": 0.0,
+          "max_history_difference": 0.0,
+          "optimizer_updates": 448,
+          "optimizer_attempts": 450
+        }
+      ],
+      "old_median_s": 10.311690699996689,
+      "new_median_s": 4.536326899997221,
+      "reduction_pct": 56.00792312361854,
+      "full_cache_fidelity": {
+        "Training": {
+          "n": 28709,
+          "pixels_equal": true,
+          "labels_equal": true,
+          "rows_equal": true,
+          "readonly": true
+        },
+        "PublicTest": {
+          "n": 3589,
+          "pixels_equal": true,
+          "labels_equal": true,
+          "rows_equal": true,
+          "readonly": true
+        },
+        "PrivateTest": {
+          "n": 3589,
+          "pixels_equal": true,
+          "labels_equal": true,
+          "rows_equal": true,
+          "readonly": true
+        }
+      },
+      "training_100_batch_profile": {
+        "data": {
+          "n": 100,
+          "median_ms": 1.6911000002437504,
+          "p95_ms": 1.8655450006917815
+        },
+        "augment": {
+          "n": 100,
+          "median_ms": 2.51505000051111,
+          "p95_ms": 3.1425799992575776
+        },
+        "transfer": {
+          "n": 100,
+          "median_ms": 0.18180000006395858,
+          "p95_ms": 0.21685999909095696
+        },
+        "forward": {
+          "n": 100,
+          "median_ms": 1.192149999042158,
+          "p95_ms": 3.3788299975640252
+        },
+        "backward": {
+          "n": 100,
+          "median_ms": 2.7581499998632353,
+          "p95_ms": 3.5183549991415926
+        },
+        "optimizer": {
+          "n": 100,
+          "median_ms": 1.2769000004482223,
+          "p95_ms": 1.9928499990783162
+        },
+        "total": {
+          "n": 100,
+          "median_ms": 9.88130000041565,
+          "p95_ms": 12.991885000883483
+        }
+      },
+      "profile_gpu_peak_allocated_mib": 193.23046875,
+      "batch128_signature_counts": {
+        "old": {
+          "all_signatures": 384,
+          "data_file_signatures": 384
+        },
+        "new": {
+          "all_signatures": 10,
+          "data_file_signatures": 6
+        }
+      }
+    },
+    "workers": {
+      "0": {
+        "samples": [
+          {
+            "full_factory_iteration_shutdown_s": 0.65548950000084,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 0.07003959999929066,
+            "steady100plus_median_ms": 1.5285999979823828,
+            "steady100plus_p95_ms": 1.6642599994156626
+          },
+          {
+            "full_factory_iteration_shutdown_s": 0.34128749999945285,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 0.003993300000729505,
+            "steady100plus_median_ms": 1.471999999921536,
+            "steady100plus_p95_ms": 1.5596249988448108
+          },
+          {
+            "full_factory_iteration_shutdown_s": 0.3387454000003345,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 0.003898700000718236,
+            "steady100plus_median_ms": 1.463500000681961,
+            "steady100plus_p95_ms": 1.5412700004162616
+          }
+        ],
+        "full_median_s": 0.34128749999945285
+      },
+      "2": {
+        "samples": [
+          {
+            "full_factory_iteration_shutdown_s": 3.550249800002348,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 2.7133921000022383,
+            "steady100plus_median_ms": 1.0754000013548648,
+            "steady100plus_p95_ms": 2.679764997810707
+          },
+          {
+            "full_factory_iteration_shutdown_s": 3.5584789000022283,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 2.741914199999883,
+            "steady100plus_median_ms": 1.1398999995435588,
+            "steady100plus_p95_ms": 2.6384449987745024
+          },
+          {
+            "full_factory_iteration_shutdown_s": 3.5248821999994107,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 2.710553400000208,
+            "steady100plus_median_ms": 0.9776000006240793,
+            "steady100plus_p95_ms": 2.729684998303128
+          }
+        ],
+        "full_median_s": 3.550249800002348
+      },
+      "4": {
+        "samples": [
+          {
+            "full_factory_iteration_shutdown_s": 3.7041333000015584,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 2.897085299995524,
+            "steady100plus_median_ms": 0.11830000039481092,
+            "steady100plus_p95_ms": 2.5936250005543116
+          },
+          {
+            "full_factory_iteration_shutdown_s": 3.7155660999997053,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 2.909252400004334,
+            "steady100plus_median_ms": 0.23570000121253543,
+            "steady100plus_p95_ms": 2.11566000161838
+          },
+          {
+            "full_factory_iteration_shutdown_s": 3.6996427000012773,
+            "n_batches": 225,
+            "first_batch_including_spawn_s": 2.9011566000008315,
+            "steady100plus_median_ms": 0.1338499987468822,
+            "steady100plus_p95_ms": 2.471494999008428
+          }
+        ],
+        "full_median_s": 3.7041333000015584
+      },
+      "process_peak_working_set_mib": 821.421875
+    },
+    "performance_methodology": {
+      "controlled_after_gpu_tests": true,
+      "earlier_concurrent_attempt_aborted_and_discarded": true,
+      "baseline_dataset_factory": "HEAD 6610651",
+      "shared_trainer": "Both baseline and safe optimized data paths use repaired Trainer and v3 save, isolating the data-path effect",
+      "three_alternating_pairs": true,
+      "warmup_full_workload_each_path": true,
+      "includes": "Factory/model/Trainer + 2 complete Training epochs + PublicTest validation + checkpoint/history/meta saves",
+      "excludes": "Warmup, CSV/cache build, post-timing cleanup",
+      "profile_100_real_batches": "5 warmup, 100 timed, synchronization per stage; stage timing is diagnostic not unsynchronized throughput",
+      "not_long_run_or_three_model_speed_claim": true
+    },
+    "compatibility": {
+      "checkpoint_version": 3,
+      "training_protocol_version": 2,
+      "old_v1_v2_exact_resume": "Explicitly rejected; original files retained, existing inference/evaluation stays supported",
+      "formal_frozen_schema": 1,
+      "new_tool": "tools/freeze_comparison.py",
+      "formal_protocol_created": false,
+      "formal_training_performed": false
+    },
+    "protected_artifacts": {
+      "file_count": 122,
+      "all_sha256_unchanged": true,
+      "files": [
+        {
+          "path": "analysis\\benchmark_amp\\results.json",
+          "sha256": "99fc88c1e4ca6b70d7f8366d2d54db959774dd92540e30c97fa087d82196af07"
+        },
+        {
+          "path": "analysis\\class_distribution.png",
+          "sha256": "16a25d004d8cae6367925db74ea7768316080f7b691e591a9b911ea27dedd991"
+        },
+        {
+          "path": "analysis\\comparison_confusion_matrices.png",
+          "sha256": "9efb13960caae3b05675e39a27b4a3e70e8e20615a9f48b59d7fff94f72d4984"
+        },
+        {
+          "path": "analysis\\comparison_param_efficiency.png",
+          "sha256": "7f2c0577505146993cb672f6089af1e7aa9e7348f11bcc88c1e684ddf3324c51"
+        },
+        {
+          "path": "analysis\\confusion_matrices\\micro_resnet_cm.png",
+          "sha256": "9d08f78e7adb52bcc7b585d0d9497aa1130ab7398a96745a77aa9ae98f8c8901"
+        },
+        {
+          "path": "analysis\\confusion_matrices\\mini_cnn_cm.png",
+          "sha256": "31a5adc8f282509d078159c99df1da044003f99b05763f039ca19f26d3a74224"
+        },
+        {
+          "path": "analysis\\confusion_matrices\\vgg_lite_cm.png",
+          "sha256": "a1e6567a053487db934066a206b1c0fa5ded378669da3049caabfe80cf5edd44"
+        },
+        {
+          "path": "analysis\\data_audit.json",
+          "sha256": "ac38786336ba2a8d2eacc2c76512a02a3fb0ef2c473134ae36d6c0f3f2b0d85e"
+        },
+        {
+          "path": "analysis\\efficiency_results.json",
+          "sha256": "06ec3a521aeded249d4e195e51b28300aa19786200866a023b065955b187054b"
+        },
+        {
+          "path": "analysis\\evaluations\\audit2_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "d8e6a15f468df57279274bee847c8a7af49fe87bdfb84d47ae0f9e396bbe33f5"
+        },
+        {
+          "path": "analysis\\evaluations\\audit2_mini_cnn_PublicTest\\summary.json",
+          "sha256": "8271f019a24107ca42c8fe2ffb862bf90ba47f3edafb808e91321245618cb557"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_micro_resnet_PrivateTest\\predictions.csv",
+          "sha256": "370bd3f21705ada7bd3818831adaf1db8241d79b7367fd50b33b6426677e025b"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_micro_resnet_PrivateTest\\summary.json",
+          "sha256": "f6639abba1668171d0489c69ebf74b2054986852ad14043a77c390fbc81485f3"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_mini_cnn_PrivateTest\\predictions.csv",
+          "sha256": "58d437c5624a35c60ea69cc2dde7a3b9feccfd700e1ac11c174c0d432e55f9d1"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_mini_cnn_PrivateTest\\summary.json",
+          "sha256": "5dfb2713ff15e1e88dcfa298e0ce23cad970dced2319b8c5896fa1a0c2216433"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_vgg_lite_PrivateTest\\predictions.csv",
+          "sha256": "78049157e5b8f37d71f7d0304b62573f62b749837e713951dbdd1c250ffd24a0"
+        },
+        {
+          "path": "analysis\\evaluations\\comparison_vgg_lite_PrivateTest\\summary.json",
+          "sha256": "5946772eb060f80dcb2eb63bbbe52b448a8244304e455b30746c7371194f5572"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PrivateTest\\predictions.csv",
+          "sha256": "370bd3f21705ada7bd3818831adaf1db8241d79b7367fd50b33b6426677e025b"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PrivateTest\\summary.json",
+          "sha256": "246cb625399cee441f43aec355917cc8d6089a34cb100ce0b585423ec7bf41ef"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PublicTest\\predictions.csv",
+          "sha256": "eb9428307e5affe3906fbef5c587cce7336f89d9ef4cc67ca832abce4cba2f22"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_micro_resnet_PublicTest\\summary.json",
+          "sha256": "aa9e0af6741ca0bafcd133ad7b0c00b310cacc184b41abdf4308caf721239dfd"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PrivateTest\\predictions.csv",
+          "sha256": "58d437c5624a35c60ea69cc2dde7a3b9feccfd700e1ac11c174c0d432e55f9d1"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PrivateTest\\summary.json",
+          "sha256": "d232fdb00404b79b1545cfbb9e61b56a8fcde85d4aa30dab496957b7188e7ff0"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "f458033fbf5e7aec4b48dd2a4b685802b06995d6119879a5a0af00cad39078dc"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_mini_cnn_PublicTest\\summary.json",
+          "sha256": "2e62fa6ebfd45117fe6c7aa09df4a85b45188723ccb72934e75fe6bfcd54b813"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PrivateTest\\predictions.csv",
+          "sha256": "78049157e5b8f37d71f7d0304b62573f62b749837e713951dbdd1c250ffd24a0"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PrivateTest\\summary.json",
+          "sha256": "aa7156ea0101a2ddeced532ec5d05f52f46611045f17ccb8281956783be2d173"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PublicTest\\predictions.csv",
+          "sha256": "bb2c5fd317e52804d1d4f0bd6e02864bd4cffd9199e08d8ea66877d0df41c29d"
+        },
+        {
+          "path": "analysis\\evaluations\\legacy_vgg_lite_PublicTest\\summary.json",
+          "sha256": "6a4ca260b0f02654101f638c1d1f9c2d4dac565484990abd9efe51e7652b7b77"
+        },
+        {
+          "path": "analysis\\evaluations\\loop2_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "1bd0275aa096bcaff023e32240743c16bcb148d8a46091c2ee48ca7e4900fcd4"
+        },
+        {
+          "path": "analysis\\evaluations\\loop2_mini_cnn_PublicTest\\summary.json",
+          "sha256": "5e9f9d19d6506bef652d9c31f5319a4111cd217bf2aa98342a57b1baeced41a3"
+        },
+        {
+          "path": "analysis\\evaluations\\smoke_mini_cnn_PublicTest\\predictions.csv",
+          "sha256": "a46d880b05485f4991356559208a91778786b03038f2e1ef59559efdd58b8019"
+        },
+        {
+          "path": "analysis\\evaluations\\smoke_mini_cnn_PublicTest\\summary.json",
+          "sha256": "ed8cb931fb10ce0866affc55527890a68fa16f91de5d8bd38a467eafd0d24212"
+        },
+        {
+          "path": "analysis\\evaluations\\summary_legacy_models.json",
+          "sha256": "f72301829ac99a729dbc2a6779fb774c23d3b7244801f786e1642b96d5e89e34"
+        },
+        {
+          "path": "analysis\\roc_curves\\micro_resnet_roc.png",
+          "sha256": "0722517d23f3ccfeb861f76147da5b5826bc844a2aeb63cbf518a2bb8ecbf832"
+        },
+        {
+          "path": "analysis\\roc_curves\\mini_cnn_roc.png",
+          "sha256": "058a88becf5f374f020425ff256f39eff90bb7d2f7e864ffd9323de0ab316d40"
+        },
+        {
+          "path": "analysis\\roc_curves\\vgg_lite_roc.png",
+          "sha256": "57c9e77212ad440073afc5b55d5510061a445881ae49e6ddb6a375b07a0f95ee"
+        },
+        {
+          "path": "analysis\\sample_visualization.png",
+          "sha256": "ee942a3382f93cdc78ad32ebd2ba1aebf86a8eca360db39eec7894a16a1d085d"
+        },
+        {
+          "path": "analysis\\training_curves\\comparison_training_curves.png",
+          "sha256": "1094dc9c829bdde3e336a8ef2d87ee2129948ab98402616a77c14216358855fb"
+        },
+        {
+          "path": "analysis\\training_curves\\micro_resnet_training_curves.png",
+          "sha256": "51c6fad71fb918b70d0f921babb864abc232f1c57662262f88f957bcd98dc5a2"
+        },
+        {
+          "path": "analysis\\training_curves\\mini_cnn_training_curves.png",
+          "sha256": "7f0695b0f8041af9c6b12b075544f056aa342b78fef02dc4967ace44821bb995"
+        },
+        {
+          "path": "analysis\\training_curves\\vgg_lite_training_curves.png",
+          "sha256": "a979b597bd7ebccd949e154353569c78ece8d6858476b5e2167ab5fc3249d218"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\meta.json",
+          "sha256": "497bbd1844217e781a906fc2c6fa031ae86aa73f8d9c2e521d3537c1a9414f24"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PrivateTest_rows.npy",
+          "sha256": "657608256d18c85b1b5528e892be0766033cea70ef788c017512db746169fd82"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PrivateTest_x.npy",
+          "sha256": "6ffc500dcedd385c750be21bb2a31c2e5d1f62a50192ff9002442c9ba7f959b1"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PrivateTest_y.npy",
+          "sha256": "b0a750c7f043a7defbf5c67fb69c908a489e50fe44a0abc7cb54d3e33e54f8af"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PublicTest_rows.npy",
+          "sha256": "ff7223c7ae1ba367312e6097ef60a014e35caed488241842c24aa4132254f036"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PublicTest_x.npy",
+          "sha256": "2ab06a0f1f661976a0d86208cb69d380059e4b9448fc1c64a854107cdc4e57b0"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\PublicTest_y.npy",
+          "sha256": "fae9e4df7c2b4b98aa697170116e5d24c70cbc186f51b369756a12392fc67606"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\Training_rows.npy",
+          "sha256": "b99e12f1f3819b6da6515403e2271fa79b8c2f9dfc4a6e05a10c39047976911b"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\Training_x.npy",
+          "sha256": "604d6678861894ac6baf26b461eb42749383bce77d816b42544b2711b7144453"
+        },
+        {
+          "path": "data\\cache\\fer2013_uint8-v2\\Training_y.npy",
+          "sha256": "bf88db1d6673100a3a01d98df21adddf0ee53c7c0950b0f27106a587a7577395"
+        },
+        {
+          "path": "data\\fer2013.csv",
+          "sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b"
+        },
+        {
+          "path": "inference\\saved_models\\export_manifest.json",
+          "sha256": "8a5f5bbdd1e9eade4163f1a078abe8743a2c60bb7f6d46b444d3b9a0ff3ddc04"
+        },
+        {
+          "path": "inference\\saved_models\\micro_resnet_best.pth",
+          "sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_20261007_022921_seed42.pth",
+          "sha256": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_20261007_031251_seed42.pth",
+          "sha256": "5928c68c9fe486899f32f71c8d3d71a49e5ae98eca487a0a95faaacf5efb4aad"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_20261007_041818_seed42.pth",
+          "sha256": "5887d3158a1bdd9c1902c1daab0d86e0523db90a3d535e20b8ca0bf10ee77888"
+        },
+        {
+          "path": "inference\\saved_models\\mini_cnn_best.pth",
+          "sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb"
+        },
+        {
+          "path": "inference\\saved_models\\vgg_lite_best.pth",
+          "sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7"
+        },
+        {
+          "path": "report&ppt\\人脸情绪识别系统课程报告.docx",
+          "sha256": "846ff0d2357045101cfd8c8f7277ab17354173b7c8f1e6465b46008e905c5cd9"
+        },
+        {
+          "path": "report&ppt\\人脸情绪识别系统课程报告.pptx",
+          "sha256": "56060c1c8c952a4a8c6b676b974bfc567720e6f70dcdd896e98a8b43c0df3ed9"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch090_20260526_234029.pth",
+          "sha256": "f9a3a094e8def718963c1dfeb15808c092be9c90e5f16e3577c5e216bbc221a8"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch090_20260526_234623.pth",
+          "sha256": "66e1f0f54ee5872788e942033e49a2f76cebebc9cf924c2929f8474e68e4d821"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch095_20260526_234645.pth",
+          "sha256": "13f4eec8d4a270835c90db7990c741860cf623a66432784523b08861a7a99a35"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch100_20260526_234713.pth",
+          "sha256": "ae2c86e8e2cac0c11884d330ad2419c87eec9e9d42e7dd400e633643702dc159"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\checkpoint_epoch105_20260526_234743.pth",
+          "sha256": "7e2ca847f89708a1aedb2b67bde80ffd8453ecf21ff202055aad175001eb5192"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\global_best.pth",
+          "sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch001_20260515_174039.pth",
+          "sha256": "0c95f798d714a3652b22ecd748ca9017e49dad07c536713b99d573802424fa33"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch003_20260517_185418.pth",
+          "sha256": "fb907ab2afb5ad06403dac01fc998ac6509b23f77cf73c6ea97b936e5b913f4d"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch006_20260517_180234.pth",
+          "sha256": "61f986ee3cc1e5c64e10fd21cacb454a812540c875145f31157ff3feb0513502"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch087_20260517_184023.pth",
+          "sha256": "675f75effb81985e811e910608dc915fe4ef6f2ecd554cc66058db6c55de0a1d"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\interrupted_epoch090_20260518_145234.pth",
+          "sha256": "c2257aab50ad19ad5de70ecd758fbf46e4ca78a85581d79eb5619fe650c13e3d"
+        },
+        {
+          "path": "training\\checkpoints\\micro_resnet\\local_best.pth",
+          "sha256": "92a62faf2ac75014da3882e88e4905434ec9b2dba99b7db0f822b611ad8b2cc8"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch040_20260520_164954.pth",
+          "sha256": "2929ec0108b3d4934d97ac84ae1c873389bc102608a383e88b9dcd402b7265de"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch045_20260520_165015.pth",
+          "sha256": "1e4f4173be7b50611025bc944332017766add08479a2d9fe6c04a27249e1ba7c"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch050_20260520_165036.pth",
+          "sha256": "90de2cf2613ba3b3c93e678b79aefd3f2d449033de9734f2bd2d50e975528ac8"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch055_20260520_165056.pth",
+          "sha256": "0a70a97d5af53c03da7b48a3dab440a6618e36d887ad93e1116eb4c80712cbbe"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\checkpoint_epoch060_20260520_165117.pth",
+          "sha256": "7fdd812a40a4013749e86adb7fae602dc88b2255828e6c384242504626db9387"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\global_best.pth",
+          "sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb"
+        },
+        {
+          "path": "training\\checkpoints\\mini_cnn\\local_best.pth",
+          "sha256": "5245051511101ce461f8b097eb64fd9daf8e00ef6e716dbed40152c248add637"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch110_20260519_233113.pth",
+          "sha256": "8ac1c971107cbf8ef68703f7a9617da6ba00f292aed54e498e7e84693fbdadf0"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch115_20260519_233136.pth",
+          "sha256": "2470900972d75c326f113219a9d10241488c07501f74ac4fd20bfccd9c1cecca"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch120_20260519_233200.pth",
+          "sha256": "3f880ba0dcb7ae83eac37d1f1bb2c05ed1ae588376f0d7674e83a39ef378e383"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch125_20260519_233223.pth",
+          "sha256": "3230f8bccbf7170efb92bb40d2edd63602c739991183ad09235b4e52fb939998"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\checkpoint_epoch130_20260519_233246.pth",
+          "sha256": "5af9db2d5f3b80b895117243bff534afbd681500975a918eea26d2a9889e963c"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\global_best.pth",
+          "sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7"
+        },
+        {
+          "path": "training\\checkpoints\\vgg_lite\\local_best.pth",
+          "sha256": "4ba56240fdb446197c56d3cbde8d2255345ce0a5f805efbbdec33d5bf9a4b962"
+        },
+        {
+          "path": "training\\logs\\micro_resnet\\history.json",
+          "sha256": "958892a42800c694a595fb8b0996021530c2e4111677c76bd7d1293dc9928f27"
+        },
+        {
+          "path": "training\\logs\\mini_cnn\\history.json",
+          "sha256": "2f5e56c9bc870c1a1ae0bcbdfd52e8b99ca772d98ce862687152e982bb4cca74"
+        },
+        {
+          "path": "training\\logs\\vgg_lite\\history.json",
+          "sha256": "e7bdefc3314274a8b16e02ebd30d69f415bc2517ea9654e89e750652b4cf5132"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\best.pth",
+          "sha256": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\last.pth",
+          "sha256": "0f3719393f87d033bee5b2d1189a651cfd42bd54855401be8796d9d50b59f682"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\config_effective.yaml",
+          "sha256": "8a26ce2d04c82748fdd62e4b411f016e9e1a11b097b31b27999b5a8f9de66620"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\history.json",
+          "sha256": "c1c1429b990fc961850a0b51e31adaa0a3451cc4c32877de33fb7e02bf53d4cc"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_022921_seed42\\run_meta.json",
+          "sha256": "7afc8ab17b278cb0b28e8c3dbabd58fac4bc388130ab98bea292e457945cbc3d"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\checkpoints\\best.pth",
+          "sha256": "5928c68c9fe486899f32f71c8d3d71a49e5ae98eca487a0a95faaacf5efb4aad"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\checkpoints\\last.pth",
+          "sha256": "6fe8191eaad7b86f7a3c6e5ffafabac9d0c9e5c78ba5fdc54ac7063a2a44c24b"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\config_effective.yaml",
+          "sha256": "8a26ce2d04c82748fdd62e4b411f016e9e1a11b097b31b27999b5a8f9de66620"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\history.json",
+          "sha256": "3d677f11031850d176f61e3ef4f396f285412a80af6706694ef2730675893556"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_031251_seed42\\run_meta.json",
+          "sha256": "80d2d716c83f80bd5020ef8a657eb0cd67c38893938e77d06888e189300526d9"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\checkpoints\\best.pth",
+          "sha256": "5887d3158a1bdd9c1902c1daab0d86e0523db90a3d535e20b8ca0bf10ee77888"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\checkpoints\\last.pth",
+          "sha256": "8e1c7649d29856177fd1333be2b4b57d0c609877e7233dbb4e0be6c217c465ae"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\config_effective.yaml",
+          "sha256": "2b9fb81e1e79c67bf9370a0f349e53312ac5f006ee6aa2694cd368c9a8bc12ca"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\history.json",
+          "sha256": "a4a6c45dda18db5ec79af0f61efa1652510d5b2c419bfeaff688d21069ab59a6"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_041818_seed42\\run_meta.json",
+          "sha256": "23e5d1457a0a16b1ecb6cb7f81b10026ec7e7c5f9bb1a3b0a920060b4a782b2c"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\checkpoints\\best.pth",
+          "sha256": "43ba24d49aff4e38d076ac0109af4faac8ae329bdd845d1b5881b4a89996d860"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\checkpoints\\last.pth",
+          "sha256": "06686de707fa37b48c9aec7cc579e9966b36e9fd76b6b50198ec1521d840f33f"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\config_effective.yaml",
+          "sha256": "e78d1194d675f86e7b07dafecd1c4d2e562b48a3265c98f2486a8703990c1185"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\history.json",
+          "sha256": "d883deceace5dfa54547a77650b57d24b6d6d229d28e7c7e25ffff50ee241685"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053805_seed42\\run_meta.json",
+          "sha256": "370f3b8d74647bd299dbf930ccbbefd8bbfa41bdfd4eeead9eb7ad26d9349e62"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\checkpoints\\best.pth",
+          "sha256": "af460f95651d97e908954c325ea29e1e66412845da12204c5ed5f1963f2440a1"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\checkpoints\\last.pth",
+          "sha256": "d884edce5970eb225218706decff2da825dbe0ef8743327775f10dc00a832d9e"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\config_effective.yaml",
+          "sha256": "37a07de11dda38d5069f5024be818eb12a12aea8195a6e3c77c428125cba98ff"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\history.json",
+          "sha256": "c439446b531c0f1c71de2fac99ea1c7d852fcc66be6ced52920bae7ced5fad37"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053819_seed42\\run_meta.json",
+          "sha256": "fb2f85e7b2c23d4f26a27d244bdb053fe6c5e7d8f64092db95d1daedcc2d4264"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\checkpoints\\best.pth",
+          "sha256": "312bd31b7441d2a7cf48c87057e41adb101580298a63b567568bfa5afd85ec9c"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\checkpoints\\interrupted_epoch002_e2e.pth",
+          "sha256": "35391987d88d1b55c9a63f6ff74bab9c098ca90576116066949d8fa6a16eddd9"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\checkpoints\\last.pth",
+          "sha256": "f64532302e14e7125010456a2c2c1a8a3af81b17348fb9ac162a2f2c89628611"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\config_effective.yaml",
+          "sha256": "e78d1194d675f86e7b07dafecd1c4d2e562b48a3265c98f2486a8703990c1185"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\history.json",
+          "sha256": "a8c52f5e9445bc82ffa5c04e4df610f8460dadb91252331139841cfd6e682c20"
+        },
+        {
+          "path": "training\\runs\\mini_cnn\\20261007_053942_seed42\\run_meta.json",
+          "sha256": "ff0c9be58236031dd54928f41829a3a69e7346e79b18ca281df80baf80156ae7"
+        }
+      ],
+      "verified_after_document_updates": true,
+      "verified_after_cleanup": true
+    },
+    "scope": {
+      "report_ppt_unchanged": true,
+      "personal_contribution_list_added": false,
+      "new_research_model_dataset_added": false,
+      "windows_project_venv_only": true,
+      "private_test_used_only_for_cache_fidelity": true,
+      "temporary_artifacts_cleaned": true
+    },
+    "document_section": "## 本次直接修复与验收（2026-10-07）\n\n**基准：** 以 6610651 工作区实施用户授权的 U01–U04、PB06 修复；未创建新的正式冻结协议或启动正式比较。此前“第四轮独立审核”保留为该提交的缺陷证据，当前五项状态以本节为准。\n\n**结果：五项修复通过本轮验收。** 完整 pytest **285 passed，7 warnings，99.77 s**；Ruff、mypy（47 源文件）和依赖检查通过。新增 52 个反例/正例回归；另补验 15 项正式准入/提交失败回滚（9.49 s）及 2 项真实 CUDA MiniCNN（AMP OFF/ON）恢复（3.75 s）。正常路径对齐模型/BN、Adam、scaler、全局 RNG 和 history，异常路径验证拒绝后真实状态与原文件保持一致。现有合法多 worker 恢复、partial 自动回滚等回归继续通过。\n\n| 问题 | 已实施修复 | 本轮验收 |\n|---|---|---|\n| U01 状态完整性 | checkpoint v3 记录实际有效更新/尝试数、每轮累计数、来源设备与 CUDA RNG 数量；校验 history/epoch/best/早停/调度器进度，scaler 数值边界及 optimizer 结构/动量/步数 | 缺失/None/空/坏 CUDA RNG、空 Adam、缺 history/best/早停、字符串调度器进度、坏重启周期、负二阶矩及坏 scaler 均拒绝；零更新和真实 AMP 全跳步合法断点可恢复 |\n| U02 失败原子性 | 模型逐键类型/dtype/形状与每组参数/ID/静态选项预检；真实加载事务备份模型/优化器/scaler/调度器/历史/计数/RNG；事件提交失败也原样恢复元数据字节 | 末尾非 Tensor、参数组缺失/未知 ID 均无副作用；在真实状态已恢复后及元数据已提交后注入异常，全部状态和文件恢复原状 |\n| U03 正式准入 | 可执行 schema-v1 冻结清单绑定源码/配置字节指纹、模型/臂/至少3 seeds、完整实际协议/数据/预算与早停；启动、续训和汇总逐项核对；区分 session_completed 与实验完成；验证真实 last/best/config/history/meta | 实际七分类 MiniCNN 分次完成预算和允许的早停通过；LR/batch/seed/数据/id/代码指纹漂移、超预算、伪造提前完成、缺模型字典、不同 run、坏 best/history/config 均拒绝 |\n| U04 严格输入 | 标签有限/整数/0–6 校验后转型；像素 float64 严格解析，截断警告和非有限值拒绝；整批验证完成后才发布缓存 | 小数/负小数/NaN/Inf/越界标签及尾部垃圾拒绝；失败不覆盖有效 meta；全35,887行像素归一化/标签/原行号与旧路径逐位一致 |\n| PB06 批级保护取数 | Dataset.__getitems__ 批前/批后校验；不可变缓存文件名与原子 meta；CSV/meta 来源签名；主进程在消费批次及 optimizer 更新前检查，预取不能绕过 | 三份缓存变更及 CSV/meta 代际变化均拒绝，forward 中注入变化时有效更新仍为0；随机增强、重复索引与标量路径完全一致，性能结果见下表 |\n\n**兼容性：** 版本1/2断点缺少可验证的更新记录，明确拒绝精确续训；历史权重仍支持既有推理/评估，不自动迁移为“完整恢复”。新训练生成 v3。best 的保存移至早停状态更新之后，使完整轮边界各组件一致。训练耗时改用 perf_counter，避免 Windows 墙钟粒度/调整导致短流程耗时为0。\n\n### 保留完整性保护后的性能验收\n\n本次使用真正部署的批级保护路径，不使用第四轮的无保护代理。基线为 HEAD 6610651 的 Dataset/工厂，两路径共用修复后的 Trainer 与 v3 保存逻辑；配置、采样、增强、设备和数据一致。完整预热后3组交替配对，包含工厂、模型/Trainer初始化、完整Training两轮、PublicTest验证和保存，均使用Windows .venv、4 CPU线程、RTX5070Ti Laptop、batch128、workers0。CSV/缓存构建、预热及清理不计入热流程。\n\n| 项目 | 标量旧路径 | 安全批级路径 |\n|---|---:|---:|\n| 两轮完整短流程中位数 | 10.312 s | 4.536 s |\n| 相对耗时减少 | — | **56.0%** |\n| 128张 Dataset 取数的三份缓存文件签名检查 | 384次 | 6次 |\n| 加上 CSV/meta 的 Dataset 批级总检查 | 384次（旧路径无新增来源保护） | 10次 |\n\n三组各自的完整history及最终模型/BN最大差均0，有效更新均448、尝试450。训练主进程另做批次消费前/更新前的保护，仍随批次而非样本数增长。该结果只覆盖当前 MiniCNN 两轮热流程，不外推三模型/90轮性能或新准确率。\n\n100个真实训练批（另有5批预热）的分段中位数/P95：取数1.69/1.87ms，增强及批级保护2.52/3.14ms，传输0.18/0.22ms，前向及损失1.19/3.38ms，反向2.76/3.52ms，裁剪/更新及保护1.28/1.99ms，合计9.88/12.99ms。该探针逐段同步GPU，耗时不能直接相加外推训练吞吐；剩余主要成本为反向和增强，逐样本stat不再占主导。GPU峰值已分配约193.23MiB（不含驱动/保留池）。\n\nworkers0/2/4各3次完整取数225批（含工厂/启动/退出，增强仍由Trainer批级执行）的中位数分别0.341/3.550/3.704s；0 worker首个独立进程读取为0.655s，后续热轮约0.34s。非持久多worker首批启动约2.71–2.91s，后续每批P95约2.12–2.73ms；本轮继续保留默认workers0。进程峰值工作集约821.42MiB，这是取数探针主进程的峰值，不代表所有子进程内存之和。\n\n### 正式比较的使用步骤\n\n实现定稿并提交后，用新增工具 tools/freeze_comparison.py 生成实际方案清单；它读取真实配置/数据管线并在系统临时目录构造元数据，校验通过才写冻结文件。示例仅冻结三个模型的CE基线A，其他既定臂需要在同一次命令中显式追加对应模型/臂/配置；不得把仅A的清单当作全部消融完成。\n\n    .\\.venv\\Scripts\\python.exe tools/freeze_comparison.py --protocol-id comparison-v2-frozen1 --output docs/comparison_protocol_frozen.json --seeds 42 43 44 --plan mini_cnn A configs/baseline_config.yaml --plan vgg_lite A configs/baseline_config.yaml --plan micro_resnet A configs/baseline_config.yaml\n\n随后使用 training/train.py --purpose formal --config 对应配置 --model 对应模型 --seed 对应seed --epochs 本次轮数；累计轮数不能超过清单预算。分次训练仅结束会话时是 session_completed，完成预算或合规早停后才 finished 并准入。实际源码/配置或冻结文件变化会使旧绑定失效，需新协议/run；当前项目仍无新正式实验结果，既有6个run保持非正式。\n\n本次没有修改课程报告/PPT，没有新增个人贡献清单。122个原CSV/缓存/权重/runs/分析/报告文件SHA-256保持一致；所有反例数据、模型与短训练输出使用系统临时目录，检查结束后删除。PrivateTest仅用于像素/标签/行号保真，无本轮模型评估或调参。\n"
   }
 }

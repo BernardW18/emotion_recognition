@@ -175,7 +175,7 @@ def test_eligibility_smoke_and_unspecified_marked_informal(tmp_path):
         assert any("run_purpose" in r for r in e["reasons"])
 
 
-def test_eligibility_formal_complete_passes(tmp_path):
+def test_eligibility_marker_only_and_minimal_checkpoint_rejected(tmp_path):
     fp = tmp_path / "frozen.json"
     fp.write_text(_FROZEN_BODY, encoding="utf-8")
     run_dir, _ = _write_case(
@@ -184,7 +184,7 @@ def test_eligibility_formal_complete_passes(tmp_path):
         write_frozen=_FROZEN_BODY,
     )
     e = check_formal_eligibility(run_dir, frozen_protocol_path=fp)
-    assert e["formal_eligible"], e["reasons"]
+    assert not e["formal_eligible"], e["reasons"]
     assert e["run_purpose"] == "formal"
 
 

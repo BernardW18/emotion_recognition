@@ -13,7 +13,6 @@ FER2013 模型训练 CLI
     python training/train.py --model micro_resnet --diagnose --steps 5
 """
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
@@ -34,7 +33,8 @@ from training.trainer import (
 )
 from utils.comparison_check import FROZEN_PROTOCOL_PATH
 from utils.config_validation import validate_config
-from utils.model_spec import build_model_from_spec, file_sha256, make_spec_from_config
+from utils.formal_protocol import load_frozen_protocol
+from utils.model_spec import build_model_from_spec, make_spec_from_config
 from utils.stdio import ensure_utf8_stdio
 
 
@@ -44,19 +44,10 @@ def _load_frozen_protocol() -> dict:
     返回记录（含文件字节 SHA-256），写入 run_meta.frozen_protocol；
     正式实验准入判定时复核该 SHA 与当前文件一致（防止事后更换冻结内容）。
     """
-    path = FROZEN_PROTOCOL_PATH
-    if not path.exists():
-        raise SystemExit(
-            f"正式训练需要先冻结比较协议：{path} 不存在。\n"
-            "冻结流程见 docs/comparison_protocol_draft.md §6；冻结后创建该文件"
-            '（至少含 "protocol_id" / "frozen_at" / "git_commit" 字段）。'
-        )
-    data = json.loads(path.read_text(encoding="utf-8"))
-    for key in ("protocol_id", "frozen_at", "git_commit"):
-        if not data.get(key):
-            raise SystemExit(f"冻结协议文件缺少字段 {key!r}: {path}")
-    data["file_sha256"] = file_sha256(path)
-    return dict(data)
+    try:
+        return load_frozen_protocol(FROZEN_PROTOCOL_PATH)
+    except (ValueError, KeyError, TypeError) as e:
+        raise SystemExit(f"正式训练需要完整冻结方案：{e}；见协议 §6") from e
 
 
 def parse_args():

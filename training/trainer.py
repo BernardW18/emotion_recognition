@@ -82,6 +82,7 @@ from training.checkpoint import (
 )
 from utils.activations import ACTIVATION_REGISTRY, get_activation
 from utils.config_validation import validate_config
+from utils.formal_protocol import completion_reason, validate_formal_plan
 from utils.losses import CBFocalLoss, FocalLoss
 from utils.model_spec import count_parameters, file_sha256, make_spec_from_config
 
@@ -319,6 +320,18 @@ def _delete_config_path(config: dict, path: tuple) -> None:
 # ============================================================
 # Trainer 核心训练器
 # ============================================================
+class _UpdateCounter:
+    """A deepcopy-safe optimizer hook that does not retain an entire Trainer."""
+
+    def __init__(self) -> None:
+        self.value = 0
+
+    def __call__(self, optimizer, args, kwargs):
+        found_inf = getattr(optimizer, "found_inf", None)
+        if found_inf is None or found_inf.item() == 0:
+            self.value += 1
+
+
 class Trainer:
     """
     统一训练器，集成:
@@ -487,27 +500,16 @@ class Trainer:
             "learning_rate", config["training"]["learning_rate"]
         )
         self.optimizer = build_optimizer(self.model, merged_training)
+        # A post-step hook counts real updates, including GradScaler skips, without GPU sync.
+        self._update_counter = _UpdateCounter()
+        self._optimizer_attempts = 0
+        self.optimizer.register_step_post_hook(self._update_counter)
         # PB03：实际生效的 fused 状态（fused=true 时 build_optimizer 已校验 CUDA 并生效）
         self._optimizer_fused = bool(merged_training.get("optimizer_fused", False))
         self.scheduler = build_scheduler(
             self.optimizer, config["training"], self.scheduler_num_epochs,
             model_config=self.model_config,
         )
-
-        # ---- run 目录（F05）----
-        if run_dir is None:
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base = f"{stamp}_seed{config['seed']}"
-            run_dir = RUNS_ROOT / model_name / base
-            suffix = 1
-            while run_dir.exists():
-                suffix += 1
-                run_dir = RUNS_ROOT / model_name / f"{base}_{suffix}"
-        self.run_dir = Path(run_dir)
-        self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.run_id = self.run_dir.name
-        self.checkpoints_dir = self.run_dir / "checkpoints"
-        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
         # ---- best / 早停计数状态 ----
         self.monitor_metric = config["checkpoint"].get("monitor_metric", "val_acc")
@@ -524,6 +526,7 @@ class Trainer:
         self.history: dict[str, list[float]] = {
             "train_loss": [], "train_acc": [], "val_loss": [],
             "val_acc": [], "val_top5_acc": [], "lr": [],
+            "optimizer_updates": [], "optimizer_attempts": [],
         }
         self.best_model_state = None  # 内存快照仅在 fit 会话内有效；权威 best 在 best.pth
         # S03：True 表示上一会话以“部分轮更新”结束（中断/异常）；
@@ -555,6 +558,26 @@ class Trainer:
         # 默认 unspecified/smoke 均为非正式，正式实验准入由 check_formal_eligibility 判定）
         self.run_purpose = str(run_purpose or "unspecified")
         self.frozen_protocol = dict(frozen_protocol) if frozen_protocol else None
+        if self.run_purpose == "formal":
+            validate_formal_plan(
+                self.frozen_protocol, self.model_name, self.model_spec.to_dict(),
+                self.get_training_protocol(),
+            )
+        # ---- run 目录（F05）----
+        if run_dir is None:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = f"{stamp}_seed{config['seed']}"
+            run_dir = RUNS_ROOT / model_name / base
+            suffix = 1
+            while run_dir.exists():
+                suffix += 1
+                run_dir = RUNS_ROOT / model_name / f"{base}_{suffix}"
+        self.run_dir = Path(run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_id = self.run_dir.name
+        self.checkpoints_dir = self.run_dir / "checkpoints"
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
         existing_meta = read_run_meta(self.run_dir)
         if existing_meta is None:
             self.run_meta = self._build_run_meta(run_meta_extra)
@@ -705,6 +728,20 @@ class Trainer:
     def _write_history(self) -> None:
         write_json_atomic(self.run_dir / "history.json", self.history)
 
+    @property
+    def _optimizer_updates(self) -> int:
+        return self._update_counter.value
+
+    @_optimizer_updates.setter
+    def _optimizer_updates(self, value: int) -> None:
+        self._update_counter.value = value
+
+    @staticmethod
+    def _validate_loader_cache(loader) -> None:
+        check = getattr(loader.dataset, "validate_cache", None)
+        if check is not None:
+            check()
+
     # ========================================================
     # checkpoint 委托（training/checkpoint.py）
     # ========================================================
@@ -753,17 +790,26 @@ class Trainer:
         checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
         # T03：与显式恢复同一完整性门槛（预检只读；失败即拒绝，不进入半恢复状态）
         _verify_checkpoint_state(self, checkpoint)
-        _restore_training_state(self, checkpoint)
+        if (
+            checkpoint.get("partial") or checkpoint.get("run_id") != self.run_id
+            or checkpoint.get("model_spec") != self.model_spec.to_dict()
+            or checkpoint.get("training_protocol") != self.get_training_protocol()
+        ):
+            raise RuntimeError("自动回滚的 last 不是当前 run/协议的完整边界")
+
+        def record_rollback():
+            self._partial_state = False
+            self.run_meta.setdefault("rollback_events", []).append({
+                "rolled_back_at": datetime.now().isoformat(),
+                "reason": "partial-update recovery",
+                "checkpoint": str(last_path),
+                "checkpoint_sha256": file_sha256(last_path),
+                "history_epochs": len(self.history["train_loss"]),
+            })
+            self._persist_run_meta()
+
+        _restore_training_state(self, checkpoint, on_commit=record_rollback)
         self.optimizer.zero_grad(set_to_none=True)
-        self._partial_state = False
-        self.run_meta.setdefault("rollback_events", []).append({
-            "rolled_back_at": datetime.now().isoformat(),
-            "reason": "partial-update recovery（上一会话中断/异常后的自动回滚）",
-            "checkpoint": str(last_path),
-            "checkpoint_sha256": file_sha256(last_path),
-            "history_epochs": len(self.history["train_loss"]),
-        })
-        self._persist_run_meta()
         print(
             f"检测到部分轮更新：已自动回滚至最近完整断点"
             f"（epoch {self.start_epoch - 1}）并记录 rollback_events"
@@ -1001,6 +1047,8 @@ class Trainer:
         epoch_idx = getattr(self, "_current_epoch", 0)
         pbar = tqdm(self.train_loader, desc=f"[Epoch {epoch_idx}]", leave=False)
         for batch_idx, (images, labels) in enumerate(pbar):
+            # Main-process guard also covers stale batches prefetched by workers.
+            self._validate_loader_cache(self.train_loader)
             # PB01：批级张量增强（CPU、.to(device) 之前；批种子 = f(seed, epoch, batch_idx)，
             # 连续与恢复训练在第 e 轮第 i 批复算出同一批增强参数）
             if self.batch_augmenter is not None:
@@ -1049,6 +1097,8 @@ class Trainer:
                         self._grad_scaler().unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
+                self._validate_loader_cache(self.train_loader)
+                self._optimizer_attempts += 1
                 if self.use_amp:
                     self._grad_scaler().step(self.optimizer)
                     self._grad_scaler().update()
@@ -1096,6 +1146,7 @@ class Trainer:
         eval_loader = loader or self.val_loader
 
         for images, labels in eval_loader:
+            self._validate_loader_cache(eval_loader)
             if images.device != self.device:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
@@ -1152,6 +1203,17 @@ class Trainer:
         if self._partial_state:
             self._rollback_to_last_checkpoint()
 
+        formal_plan = None
+        if self.run_purpose == "formal":
+            formal_plan = validate_formal_plan(
+                self.frozen_protocol, self.model_name, self.model_spec.to_dict(),
+                self.get_training_protocol(),
+            )
+            if self.start_epoch + additional_epochs - 1 > formal_plan["max_epochs"]:
+                raise ValueError("本次会话将超过冻结预算，拒绝训练")
+            if self.run_meta.get("experiment_completed"):
+                raise ValueError("正式实验已完成，不能追加训练；请新建方案/run")
+
         total_epochs = self.start_epoch + additional_epochs - 1
 
         print(f"\n{'=' * 60}")
@@ -1179,7 +1241,7 @@ class Trainer:
 
         print(f"{'=' * 60}\n")
 
-        fit_start = time.time()
+        fit_start = time.perf_counter()
         session_start_epoch = self.start_epoch
         self._persist_run_meta(
             status="running",
@@ -1195,7 +1257,7 @@ class Trainer:
             for epoch in range(session_start_epoch, session_start_epoch + additional_epochs):
                 self._current_epoch = epoch
                 session_epoch = epoch - session_start_epoch + 1
-                epoch_start = time.time()
+                epoch_start = time.perf_counter()
 
                 # 训练 + 验证
                 train_loss, train_acc = self.train_one_epoch()
@@ -1203,15 +1265,17 @@ class Trainer:
                 current_lr = self.optimizer.param_groups[0]["lr"]
 
                 # 计时统计
-                epoch_elapsed = time.time() - epoch_start
-                self._total_train_time = self._accumulated_train_time + (time.time() - fit_start)
+                epoch_elapsed = time.perf_counter() - epoch_start
+                self._total_train_time = self._accumulated_train_time + (
+                    time.perf_counter() - fit_start
+                )
                 epochs_this_session = epoch - session_start_epoch + 1
 
                 total_history_epochs = len(self.history["train_loss"])
                 if total_history_epochs > 0 and self._accumulated_train_time > 0:
                     avg_epoch_time = self._total_train_time / total_history_epochs
                 else:
-                    avg_epoch_time = (time.time() - fit_start) / epochs_this_session
+                    avg_epoch_time = (time.perf_counter() - fit_start) / epochs_this_session
 
                 remaining_epochs = session_start_epoch + additional_epochs - epoch - 1
                 eta_seconds = avg_epoch_time * remaining_epochs
@@ -1223,6 +1287,8 @@ class Trainer:
                 self.history["val_acc"].append(val_acc)
                 self.history["val_top5_acc"].append(val_top5)
                 self.history["lr"].append(current_lr)
+                self.history["optimizer_updates"].append(self._optimizer_updates)
+                self.history["optimizer_attempts"].append(self._optimizer_attempts)
 
                 # 学习率调度
                 if self.scheduler:
@@ -1247,8 +1313,6 @@ class Trainer:
                 if improved:
                     self.best_monitor_value = current_metric
                     self.best_epoch = epoch
-                    if self.save_best:
-                        self.save_checkpoint(self.checkpoints_dir / "best.pth")
                     marker = " *"
 
                 # ---- 早停计数（F08）----
@@ -1260,6 +1324,10 @@ class Trainer:
                         self.hist_min_val_loss, self.loss_worse_counter,
                         val_loss, self.val_loss_threshold,
                     )
+
+                # Save after updating all progress, including early-stop counters.
+                if improved and self.save_best:
+                    self.save_checkpoint(self.checkpoints_dir / "best.pth")
 
                 # ---- 定期保存 ----
                 if epoch % save_every == 0:
@@ -1313,7 +1381,9 @@ class Trainer:
 
         except KeyboardInterrupt:
             interrupted = True
-            self._total_train_time = self._accumulated_train_time + (time.time() - fit_start)
+            self._total_train_time = self._accumulated_train_time + (
+                time.perf_counter() - fit_start
+            )
             interrupted_epoch = getattr(self, "_current_epoch", session_start_epoch)
             print(f"\n⚠️  训练被用户中断 (第 {interrupted_epoch} 轮)")
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1327,14 +1397,14 @@ class Trainer:
                   "同一实例再次 fit 将先自动回滚到最近完整断点（rollback_events 记录）")
         except Exception as e:
             # 失败会话的耗时同样计入累计（时间实际已消耗；状态由 run_meta 标记 failed）
-            self._accumulated_train_time += time.time() - fit_start
+            self._accumulated_train_time += time.perf_counter() - fit_start
             # S03：异常退出可能留下部分轮更新；禁止未经回滚的直接继续
             self._partial_state = True
             self._persist_run_meta(status="failed", error=repr(e))
             raise
 
         # ---- 收尾（R04：推进会话起点与累计时长，支持同实例重复 fit）----
-        self._accumulated_train_time += time.time() - fit_start
+        self._accumulated_train_time += time.perf_counter() - fit_start
         self._total_train_time = self._accumulated_train_time
         self.start_epoch = len(self.history["train_loss"]) + 1
         self._write_history()
@@ -1347,8 +1417,16 @@ class Trainer:
                 final_epoch=final_epoch,
             )
         else:
+            reason = None
+            if formal_plan is not None:
+                last = torch.load(
+                    self.checkpoints_dir / "last.pth", map_location="cpu", weights_only=False
+                )
+                reason = completion_reason(formal_plan, last)
             self._persist_run_meta(
-                status="finished",
+                status="finished" if formal_plan is None or reason else "session_completed",
+                experiment_completed=bool(reason) if formal_plan is not None else False,
+                completion_reason=reason,
                 finished_at=datetime.now().isoformat(),
                 final_epoch=final_epoch,
                 stop_reason=stop_reason,

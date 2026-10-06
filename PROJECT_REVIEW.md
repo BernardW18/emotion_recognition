@@ -8,13 +8,13 @@
 
 本轮只处理当前项目的正确性、可复现性、训练可靠性和材料表达。保留 MiniCNN、VGGLite、MicroResNet 三个现有模型以及 FER2013 数据；不提出新研究问题，不新增架构、分类头改造、其他数据集或论文迁移任务。对现有损失、采样、增强和 AMP 的检查，是为了确认项目已有功能及结论是否成立。
 
-第三轮重构与性能优化独立审核已完成：197 项测试、Ruff、mypy 与依赖检查通过，Windows CUDA 可用；上一轮常规反例已修复，批级增强和快速预测明显提速。但另复现 3 项 P1 续训问题与 3 项 P2 缓存/材料问题（T01–T06）。**完整验收暂不通过；默认配置的恢复能力及断点完整性需在正式训练前解决。** 本轮实测、修复方案和验收标准见末尾“第三轮重构与性能优化独立审核”。
+本次已直接修复第四轮独立审核提出的 U01–U04 和 PB06，五项通过本轮验收：285 项测试、Ruff、mypy（47文件）与依赖检查通过。真实 MiniCNN CUDA AMP OFF/ON 恢复一致；安全批级取数使两轮完整短流程中位10.31→4.54s（-56.0%）。**本次修复通过；正式方案仍未冻结，多seed正式比较尚未执行。** 实施与验收见末尾“本次直接修复与验收”。
 
-本文中的“验收标准”是各项修复需要满足的条件。**当前基准为 2026-10-07 提交 b75d8e3，最新结论以第三轮独立审核为准**；第二轮及性能初审保留为历史记录。F05/F09 尚有 T01–T03，缓存完整性见 T04，增强语义和正式实验准入见 T05/T06；F07/F11 的冻结协议与正式比较仍未完成。本次不改训练实现、不启动正式重训，只更新审核记录及相关文档。P0 表示正式重训前需要完成，P1 表示相关功能或结论使用前需要完成，P2 表示演示/对外材料前需要完成；性能项不能代替正确性验收。
+本文中的“验收标准”是各项修复需要满足的条件。当前代码以 6610651 工作区实施用户授权修复，最新状态以末尾直接修复验收为准；之前独立审核及作者执行记录保留为历史证据。U01–U04/PB06已通过本轮修复验收，F07/F11 的正式冻结与多seed实验仍待执行。P0/P1/P2为原审核优先级，性能结果不能代替正确性或精度实验。
 
 ## Windows CUDA 环境：已安装并验收
 
-本节保留历史环境与三模型最小更新记录；第三轮已复核当前环境并运行 197 项测试，新增结果见末尾及证据文件。历史 36 项测试与四批次 GPU 更新不冒充本次正式训练。
+本节保留历史环境与三模型最小更新记录；本次直接修复后285项测试通过，Windows .venv和CUDA继续使用。历史36/197/233项检查不冒充本次正式训练，最新验证见文末和证据文件。
 
 本项目统一使用 Windows 虚拟环境：`D:\Document\Unniversity\emotion_recognition\.venv\Scripts\python.exe`。本轮已检查用户安装后的实际环境；后续 Python 操作继续使用这个解释器。Notebook 的 `Emotion Recognition (.venv)` 内核也已核对指向此路径。`D:\AI` 的 WSL 约定不扩展到本项目。
 
@@ -908,6 +908,8 @@ R01–R07 是本次复现的正确性返修项；R08 是正式比较的未完成
 
 ## 第三轮重构与性能优化独立审核（2026-10-07）
 
+**历史记录说明：** 本节及其后的“第五轮修复”是对应提交的审核/执行记录。作者追加的“已修复”不代表当前独立验收全部通过；最新状态统一见末尾第四轮独立审核。
+
 **审核基准：** 提交 b75d8e34c1b5c8ff20ce050157d1f90f55d9a075，对比上一轮 9c2f8ed918e71fbe236243f30bbd0e79f75b2066。本节复核作者文中的“第三轮修复”和“第四轮性能修复”执行记录；前文保留为历史证据。
 
 **结论：常规路径与性能优化已有明显进展，完整验收仍未通过。** 全部现有质量检查通过，上一轮具体反例的常规修复已复核；另复现 T01–T06 六项问题，其中 T01–T03 是 P1 续训问题。三模型统一预算已落地，正式协议仍未冻结，多 seed 正式训练及消融结果尚未形成。当前可以展示工程实现和历史权重的可追溯评估，不能把短训练、历史分数或速度提升当作新模型训练结论。
@@ -1115,3 +1117,150 @@ smoke；formal 要求 `docs/comparison_protocol_frozen.json` 存在并写入 run
   原 CSV（SHA 3b8d9617…）、历史权重/评估/报告未改动。
 - **边界（如实记录）**：T05 的准确率/F1 结论仍待同一冻结实现的多 seed 正式实验；
   T06 冻结文件尚未创建（正式训练前执行冻结流程）；T02 配对为 2 轮短程完整流程。
+
+## 第四轮重构独立审核（2026-10-07）
+
+**基准：** 提交 6610651cfd50d7e8e5645543b788c15e322c3a7b，对比 b75d8e34c1b5c8ff20ce050157d1f90f55d9a075。本节复核用户第四轮重构及作者称为“第五轮修复”的 T01–T06 执行记录。前面的测试数量、缺陷状态和性能数据分别对应历史基准，当前结论以本节为准。
+
+**结论：常规流程改善明确，完整验收仍未通过。** 233 项测试、Ruff、mypy、依赖检查与实际 CUDA 运算通过。T01/T02/T05 的本轮修复通过复核；T03/T04/T06 为部分通过，仍有 U01–U04 的状态预检/准入/输入校验缺口，新增 PB06 性能瓶颈。正式比较协议仍未冻结，6 个现有 run 全部判为非正式；没有形成新的多 seed 正式结果。本项目适合展示当前工程实现与历史评估，暂不能宣称“全部修复已验收”或“完成正式消融”。
+
+### 质量检查与逐项复核
+
+| 检查 | 本轮独立结果 |
+|---|---|
+| Windows 环境 | 项目 .venv，Python 3.10.11、torch 2.14.1+cu130、torchvision 0.29.1+cu130，CUDA 13.0，RTX 5070 Ti Laptop GPU，实际矩阵运算通过 |
+| pytest | **233 passed，7 warnings，80.57 s** |
+| Ruff / mypy / pip check | 全部通过；mypy 43 个源文件无错误 |
+| T01 显式 partial 恢复 | **通过**。真实 MiniCNN 临时反例恢复后 Adam step=8，与连续两轮相同，最大参数差 0；有回滚说明。无完整 last、last 为 partial、来源 run 不同的拒绝回归通过 |
+| T02 默认数据管线 | **通过**。主/基线均 workers=0、persistent=false，防漂移回归通过，主配置隔离完整短流程正常。旧 workers 配对耗时仅作为作者记录，当前成本另见 PB06 |
+| T03 状态完整性 | **部分通过**。原 loader_rng={} 反例被预检拒绝且状态/文件不变；CUDA RNG、Adam 历史、进度/数值及拒绝原子性仍有 U01/U02 |
+| T04 缓存完整性 | **部分通过**。x/y/rows 全部只读，打开后损坏 x 会重建到源像素 95；全三划分像素/标签/行号保真。非法输入漏检见 U04，逐样本 stat 开销见 PB06 |
+| T05 增强语义说明 | **通过实现与说明复核**。独立实现/输出分布不同已写入源码和配置，二值反例及版本切换拒绝回归通过。新的准确率/F1 结论仍需正式实验 |
+| T06 来源/准入分离 | **部分通过**。run-bound 与正式资格分开，现有 6 个短 run 全部非正式；正式门槛仍有 U03 |
+| 受保护材料 | 122 个原文件审核前后 SHA-256 一致，包括 CSV、缓存、权重、runs、分析产物和 DOCX/PPTX |
+
+新增反例不算入 233 个项目测试。所有 Python 使用 Windows .venv；临时模型、迷你 CSV、完整短训练输出和探针均隔离在系统临时目录。本轮只更新审核记录及相关文档，不改实现/测试、不正式重训、不导出权重，不改报告/PPT，不设个人贡献清单。PrivateTest 只用于缓存像素/标签/行号保真检查，未评估本轮短训练模型或用于调参。
+
+### U01 · P1 · “完整恢复”仍接受缺失或无效的关键状态（T03 / F09）
+
+**位置：** [training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:327)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:377)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:410)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:454)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:534)。
+
+**问题与证据：** 预检已拦截原来的 loader RNG 缺项，但“能设置/能转换类型”不等于完整、合法的训练状态。以下操作都仅针对临时完整断点：
+
+| 无效状态 | 当前行为及影响 |
+|---|---|
+| GPU MiniCNN（dropout=0.3）的 CUDA RNG 删除、None 或空列表 | 都被接受，global_rng 标为 ok；再训练一轮与合法恢复最大参数差约 **0.0245155** |
+| 已有 4 次 FP32 更新的 Adam state 改为 {} | 接受并丢失动量/步数；继续后累计 step **4**，合法恢复为 **8**，最大参数差 **0.0145778** |
+| 删除 history / best / early_stop_state | 都被接受；缺 history 时 start_epoch=2 但历史为空，best/早停状态则回到默认值 |
+| scheduler.last_epoch 改为字符串 | 预检及加载成功，下一次 fit 因字符串加整数报错，run 变 failed |
+| AMP scale=0/NaN、backoff_factor=2、growth_interval=0 | 都被接受并标为 checked；只转换 float/int 没有验证有效范围 |
+
+**修复方案：** 按来源设备和实际组件声明必需状态，核验 CUDA RNG 的设备映射/数量及每份状态，禁止使用缺失/空状态冒充恢复。模型/优化器保存实际更新数，与 state、history、epoch、best、早停进度交叉验证；区分初始零更新、AMP 全部跳步等合法空状态。调度器验证完整动态进度，scaler 检查有限正 scale、growth_factor>1、0<backoff_factor<1、正整数 interval 和合法 tracker，而不只是类型转换。旧断点缺乏必要字段时明确拒绝精确续训或迁移为独立非精确 run。
+
+**验收标准：** 将表中每个反例固化为回归，全部在真实状态/原文件改变前拒绝，不写成功恢复事件。合法 CPU/GPU、AMP OFF/ON、无 scheduler、零更新/跳步断点不误拒；连续/恢复在逐批输入、模型/BN、optimizer/scaler/scheduler、RNG、完整 history 与早停触发上匹配。GPU dropout 测试必须覆盖 CUDA RNG 的删除、None、空列表、错误数量及坏 Tensor。
+
+**状态：未通过；正式使用精确续训前补齐。**
+
+### U02 · P1 · 预检未覆盖真实加载错误，拒绝后模型已经改变（T03 / F09）
+
+**位置：** [training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:443)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:461)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:510)。
+
+**问题与证据：** 模型检查只在双方都是 Tensor 时比较形状；优化器只比 param_groups 数量，没比每组参数数目。将临时模型最后一个 bias 的值改为字符串，预检放行，真实 load_state_dict 报错之前已写入前面的 weight。将优化器一组 params 删掉一个，预检放行，加载模型后才因参数组大小不匹配报错，weight/bias 都已改变。两例文件和恢复事件未改写，但真实 Trainer 已不是加载前状态，Jupyter 中继续使用会带入未登记权重。
+
+**修复方案：** 模型逐键验证类型、形状和所需数值约束，优化器校验各组参数数量、ID 映射、state 键和对应张量。恢复先在隔离对象上完成实际 dry-run，或设计带完整备份的事务式提交；模型、优化器、scaler、调度器、RNG、history 任一步失败均恢复原状，成功后再记录事件。只读预检不能用部分形状检查代替真正可恢复性检查。
+
+**验收标准：** 坏 Tensor 类型、末尾键错误、每组参数增删、非法 state ID/形状分别覆盖，断言拒绝前后模型/BN、优化器、调度器、scaler、CPU/CUDA RNG、history 及原 run 文件均相同。用真实 MiniCNN 补集成回归；合法断点和 partial→last 回滚仍通过，不因预检额外消费全局 RNG。
+
+**状态：未通过；“失败不改真实状态”的承诺尚不成立。**
+
+### U03 · P1 · 正式准入只绑定标记文件，没有验证实际方案和完整断点（T06 / F07 / F11）
+
+**位置：** [training/train.py](D:/Document/Unniversity/emotion_recognition/training/train.py:40)、[utils/comparison_check.py](D:/Document/Unniversity/emotion_recognition/utils/comparison_check.py:302)、[utils/comparison_check.py](D:/Document/Unniversity/emotion_recognition/utils/comparison_check.py:330)。
+
+**问题与证据：** 冻结文件当前只要求 id/日期/commit，加载与准入不检查实际配置、数据和完成预算。临时七分类 MiniCNN 使用标准数据工厂和完整 checkpoint/history，来源校验为 run-bound；冻结记录声明 LR=3e-4、batch=128、上限90、seeds=42/43/44 和官方 CSV SHA，但实际 LR=0.01、batch=4、seed=11、只训练1轮且没有早停，数据 SHA 也不同，仍得到 formal_eligible=true、reasons=[]。把 last 换成仅含 partial=false 的字典，准入仍为 true。现有正例测试同样用这种最小字典，无法证明“完整合法 run”。
+
+**修复方案：** 冻结实际可执行方案：配置快照/规范化摘要、模型/臂、允许 seeds、数据/划分指纹、增强版本、预算和完成规则；读取并核对协议 id 与内容，不只比较标记文件 SHA。formal 启动、续训、最终汇总分别校验实际设置。区分“会话结束”和“实验完成”：短会话未到预算且无允许的早停原因时保持未完成，超预算也拒绝。准入必须验证 last/best 的完整 schema、模型/run/数据/协议与 history/meta 绑定，源文件缺失或坏权重不能只靠 partial=false 放行。
+
+**验收标准：** 改 LR/batch/seed/数据、错误协议 id、未达预算且无早停、超预算、缺模型状态、其他 run 的 last/best 均被拒绝或排除。合规分次训练尚未完成时不进入汇总，达到预算或允许的早停后才准入。用真实完整产物替代当前正例最小字典；来源绑定和准入两个阶段同时测试。三个模型及各臂/seed 的正式结果都能追到同一冻结方案及其允许差异。
+
+**状态：未通过；冻结与正式训练入口仍需完善后再开始正式实验。**
+
+### U04 · P2 · 非整数标签和像素字符串尾部垃圾仍被静默接纳（T04 / F10）
+
+**位置：** [data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:112)、[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:140)。
+
+**问题与证据：** 像素 256、-1、1.5 的原反例已拒绝。但标签先转 int64 再验范围，临时 CSV 的 emotion=1.5 被缓存为标签1。2304 个合法像素后追加 junk，np.fromstring 返回2304个值并发出警告，构建逻辑仍接受。当前官方 CSV 的全量合法数据已通过保真核验，这些是非法输入防护缺口，不表示原数据被污染。
+
+**修复方案：** 转型前验证标签有限、整数性和 0–6 范围，错误注明原行号。像素解析必须确认消费完整字符串；可将截断解析警告转为异常或使用等价的严格词元校验。先完成输入验证再发布缓存，不能把截断结果写成“合法数据”。
+
+**验收标准：** 小数/负小数/非有限/越界标签、像素尾部垃圾和中间坏词元全部拒绝，合法尾部空白、0/255 和整数标签通过。三划分全量像素归一化、标签、原行号和指纹继续与旧路径一致；缓存构建失败不覆盖原有效 meta，热加载不重复字符串校验。
+
+**状态：部分通过；正式合法数据保真已通过，非法输入边界待补齐。**
+
+### PB06 · 优化顺序 1 · 逐样本文件签名检查成为新的训练瓶颈
+
+**位置：** [data/dataloader.py](D:/Document/Unniversity/emotion_recognition/data/dataloader.py:134)、[data/pixel_cache.py](D:/Document/Unniversity/emotion_recognition/data/pixel_cache.py:428)。
+
+**问题与证据：** 每次 __getitem__ 都调用 get_memmap_split，热路径对 x/y/rows 各 stat 一次。真实128张批次触发 **384 次签名检查**，Training 一轮28,709张约86,127次。仅工厂/句柄热加载约0.0003秒无法反映这一开销。CPU4线程、默认workers=0、已存在缓存，3组配对：
+
+| 测量 | 当前实现中位数 | 临时复用数组代理 | 说明 |
+|---|---:|---:|---|
+| 完整 Training 取数一轮 | 2.719 s | 0.277 s | 不含增强/GPU/验证/保存；耗时 -89.8% |
+| MiniCNN 完整两轮短流程 | 10.163 s | 4.153 s | 含工厂、模型/Trainer初始化、训练、正确 PublicTest 验证和保存；耗时 -59.1% |
+
+第二项经过完整预热，3组交替配对，代理按官方 split 路由，训练历史与最终模型/BN状态最大差均为0，Adam累计有效更新均448（两路径一致；未把批次数当作有效更新数）。最初错误路由验证缓存的对照已丢弃，不用于结论。代理跳过重复签名校验，仅用于归因，未部署且不能作为保留完整性保护的最终方案；59.1%不是修复后的加速保证，也不外推到三模型/90轮长期训练。
+
+**修复方案：** 把安全校验提升到批级读取入口，例如实现 Dataset.__getitems__，每批打开/取数组前后校验来源版本和三份文件签名，再按同一索引顺序逐样本处理，维持增强/采样/RNG语义。结合不可变缓存代际文件、原子 meta 和已固定的数据指纹，变化时拒绝当前训练，不默默重建并切换来源。保留冷打开 SHA 核验及 T04 的损坏检测，不直接删除保护；复测 workers=0/2/4 后选择默认值。
+
+**验收标准：** 所有 T04/U04 回归通过，运行中换/删/改 x/y/rows 能在下批训练更新前拒绝；同种子采样/增强的输入、模型/BN、优化器/scaler及验证输出匹配。签名检查随批次数增长而非样本数，128张不再做384次。相同配置至少3组完整加载→训练→验证→保存配对，建议总耗时中位数改善≥10%；记录首轮/后续轮、取数/增强/GPU/验证/保存、峰值内存与至少100批真实P95，不用工厂时间或无校验代理替代完整性能验收。
+
+**状态：瓶颈已确认；安全优化尚未实施。**
+
+### 推理与下一轮安排
+
+缓存 v2 的完整 Training/PublicTest/PrivateTest 共35,887行，像素 float32/255、标签、原行号均与旧路径逐位一致，三数组只读。三个固定历史权重在完整PublicTest 3,589张上的CUDA新旧预测概率最大差均0、预测和标签一致。128张批级增强本轮7次中位1.37ms。推理实现本轮未变，继续保持按需Grad-CAM、同键缓存和局部梯度路径；本轮未重新测浏览器端到端P95，不把上轮速度直接当作新增保证。
+
+先修 U01/U02 的完整性与失败原子性，再补 U03 的实际方案冻结/准入；U04 与 PB06 可在同一缓存修复轮处理。保持全部现有质量检查通过并增加上述反例回归，随后再按已有协议做正式多seed比较。当前未创建冻结文件、未新增研究问题/模型/数据集、未改报告/PPT或个人贡献要求。
+
+## 本次直接修复与验收（2026-10-07）
+
+**基准：** 以 6610651 工作区实施用户授权的 U01–U04、PB06 修复；未创建新的正式冻结协议或启动正式比较。此前“第四轮独立审核”保留为该提交的缺陷证据，当前五项状态以本节为准。
+
+**结果：五项修复通过本轮验收。** 完整 pytest **285 passed，7 warnings，99.77 s**；Ruff、mypy（47 源文件）和依赖检查通过。新增 52 个反例/正例回归；另补验 15 项正式准入/提交失败回滚（9.49 s）及 2 项真实 CUDA MiniCNN（AMP OFF/ON）恢复（3.75 s）。正常路径对齐模型/BN、Adam、scaler、全局 RNG 和 history，异常路径验证拒绝后真实状态与原文件保持一致。现有合法多 worker 恢复、partial 自动回滚等回归继续通过。
+
+| 问题 | 已实施修复 | 本轮验收 |
+|---|---|---|
+| U01 状态完整性 | checkpoint v3 记录实际有效更新/尝试数、每轮累计数、来源设备与 CUDA RNG 数量；校验 history/epoch/best/早停/调度器进度，scaler 数值边界及 optimizer 结构/动量/步数 | 缺失/None/空/坏 CUDA RNG、空 Adam、缺 history/best/早停、字符串调度器进度、坏重启周期、负二阶矩及坏 scaler 均拒绝；零更新和真实 AMP 全跳步合法断点可恢复 |
+| U02 失败原子性 | 模型逐键类型/dtype/形状与每组参数/ID/静态选项预检；真实加载事务备份模型/优化器/scaler/调度器/历史/计数/RNG；事件提交失败也原样恢复元数据字节 | 末尾非 Tensor、参数组缺失/未知 ID 均无副作用；在真实状态已恢复后及元数据已提交后注入异常，全部状态和文件恢复原状 |
+| U03 正式准入 | 可执行 schema-v1 冻结清单绑定源码/配置字节指纹、模型/臂/至少3 seeds、完整实际协议/数据/预算与早停；启动、续训和汇总逐项核对；区分 session_completed 与实验完成；验证真实 last/best/config/history/meta | 实际七分类 MiniCNN 分次完成预算和允许的早停通过；LR/batch/seed/数据/id/代码指纹漂移、超预算、伪造提前完成、缺模型字典、不同 run、坏 best/history/config 均拒绝 |
+| U04 严格输入 | 标签有限/整数/0–6 校验后转型；像素 float64 严格解析，截断警告和非有限值拒绝；整批验证完成后才发布缓存 | 小数/负小数/NaN/Inf/越界标签及尾部垃圾拒绝；失败不覆盖有效 meta；全35,887行像素归一化/标签/原行号与旧路径逐位一致 |
+| PB06 批级保护取数 | Dataset.__getitems__ 批前/批后校验；不可变缓存文件名与原子 meta；CSV/meta 来源签名；主进程在消费批次及 optimizer 更新前检查，预取不能绕过 | 三份缓存变更及 CSV/meta 代际变化均拒绝，forward 中注入变化时有效更新仍为0；随机增强、重复索引与标量路径完全一致，性能结果见下表 |
+
+**兼容性：** 版本1/2断点缺少可验证的更新记录，明确拒绝精确续训；历史权重仍支持既有推理/评估，不自动迁移为“完整恢复”。新训练生成 v3。best 的保存移至早停状态更新之后，使完整轮边界各组件一致。训练耗时改用 perf_counter，避免 Windows 墙钟粒度/调整导致短流程耗时为0。
+
+### 保留完整性保护后的性能验收
+
+本次使用真正部署的批级保护路径，不使用第四轮的无保护代理。基线为 HEAD 6610651 的 Dataset/工厂，两路径共用修复后的 Trainer 与 v3 保存逻辑；配置、采样、增强、设备和数据一致。完整预热后3组交替配对，包含工厂、模型/Trainer初始化、完整Training两轮、PublicTest验证和保存，均使用Windows .venv、4 CPU线程、RTX5070Ti Laptop、batch128、workers0。CSV/缓存构建、预热及清理不计入热流程。
+
+| 项目 | 标量旧路径 | 安全批级路径 |
+|---|---:|---:|
+| 两轮完整短流程中位数 | 10.312 s | 4.536 s |
+| 相对耗时减少 | — | **56.0%** |
+| 128张 Dataset 取数的三份缓存文件签名检查 | 384次 | 6次 |
+| 加上 CSV/meta 的 Dataset 批级总检查 | 384次（旧路径无新增来源保护） | 10次 |
+
+三组各自的完整history及最终模型/BN最大差均0，有效更新均448、尝试450。训练主进程另做批次消费前/更新前的保护，仍随批次而非样本数增长。该结果只覆盖当前 MiniCNN 两轮热流程，不外推三模型/90轮性能或新准确率。
+
+100个真实训练批（另有5批预热）的分段中位数/P95：取数1.69/1.87ms，增强及批级保护2.52/3.14ms，传输0.18/0.22ms，前向及损失1.19/3.38ms，反向2.76/3.52ms，裁剪/更新及保护1.28/1.99ms，合计9.88/12.99ms。该探针逐段同步GPU，耗时不能直接相加外推训练吞吐；剩余主要成本为反向和增强，逐样本stat不再占主导。GPU峰值已分配约193.23MiB（不含驱动/保留池）。
+
+workers0/2/4各3次完整取数225批（含工厂/启动/退出，增强仍由Trainer批级执行）的中位数分别0.341/3.550/3.704s；0 worker首个独立进程读取为0.655s，后续热轮约0.34s。非持久多worker首批启动约2.71–2.91s，后续每批P95约2.12–2.73ms；本轮继续保留默认workers0。进程峰值工作集约821.42MiB，这是取数探针主进程的峰值，不代表所有子进程内存之和。
+
+### 正式比较的使用步骤
+
+实现定稿并提交后，用新增工具 tools/freeze_comparison.py 生成实际方案清单；它读取真实配置/数据管线并在系统临时目录构造元数据，校验通过才写冻结文件。示例仅冻结三个模型的CE基线A，其他既定臂需要在同一次命令中显式追加对应模型/臂/配置；不得把仅A的清单当作全部消融完成。
+
+    .\.venv\Scripts\python.exe tools/freeze_comparison.py --protocol-id comparison-v2-frozen1 --output docs/comparison_protocol_frozen.json --seeds 42 43 44 --plan mini_cnn A configs/baseline_config.yaml --plan vgg_lite A configs/baseline_config.yaml --plan micro_resnet A configs/baseline_config.yaml
+
+随后使用 training/train.py --purpose formal --config 对应配置 --model 对应模型 --seed 对应seed --epochs 本次轮数；累计轮数不能超过清单预算。分次训练仅结束会话时是 session_completed，完成预算或合规早停后才 finished 并准入。实际源码/配置或冻结文件变化会使旧绑定失效，需新协议/run；当前项目仍无新正式实验结果，既有6个run保持非正式。
+
+本次没有修改课程报告/PPT，没有新增个人贡献清单。122个原CSV/缓存/权重/runs/分析/报告文件SHA-256保持一致；所有反例数据、模型与短训练输出使用系统临时目录，检查结束后删除。PrivateTest仅用于像素/标签/行号保真，无本轮模型评估或调参。
