@@ -238,6 +238,8 @@ def generate_gradcam(
     - hook 在 finally 中移除（异常安全，多次调用不积累 hook）
     - 调用前后的训练/eval 状态恢复；梯度在结束后清零，不修改模型参数
     - 目标类别必须在 [0, 类别数) 范围内，否则明确报错
+    - PB04：target_class 已提供时：仅 1 次带梯度前向 + 1 次反向（0 次目标判断前向）；
+      target_class=None 时才需 1 次无梯度前向判断目标类
 
     Returns:
         heatmap: numpy array (48, 48)，值域 [0, 1]；零响应时全 0
@@ -255,16 +257,13 @@ def generate_gradcam(
 
     tensor = preprocess_image(image).to(device)
 
-    # 先确定目标类别并校验范围
-    with torch.no_grad():
-        logits = model(tensor)
-    num_classes = logits.size(1)
+    # PB04：目标类别已知时跳过「目标判断前向」（仅执行带梯度前向 + 反向）；
+    # 范围校验延迟到带梯度前向之后（不额外前向）
     if target_class is None:
+        with torch.no_grad():
+            logits = model(tensor)
         target_class = int(torch.argmax(logits, dim=1)[0])
     target_class = int(target_class)
-    if not 0 <= target_class < num_classes:
-        model.train(was_training)
-        raise ValueError(f"target_class={target_class} 超出 [0, {num_classes}) 范围")
 
     gradients: list[torch.Tensor] = []
     activations: list[torch.Tensor] = []
@@ -282,6 +281,10 @@ def generate_gradcam(
     try:
         model.zero_grad(set_to_none=True)
         outputs = model(tensor)
+        if not 0 <= target_class < outputs.size(1):
+            raise ValueError(
+                f"target_class={target_class} 超出 [0, {outputs.size(1)}) 范围"
+            )
         score = outputs[0, target_class]
         score.backward()
     finally:

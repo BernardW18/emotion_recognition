@@ -200,3 +200,89 @@ def test_describe_checkpoint_reports_spec_and_params():
     assert info["params_total"] == 753991
     assert info["legacy"] is True  # 旧格式权重
     assert len(info["sha256"]) == 64
+
+
+# ============================================================
+# PB04 · Grad-CAM 计数行为（目标已知时无额外前向）
+# ============================================================
+def test_gradcam_with_target_skips_probe_forward():
+    """提供 target_class 时：仅 1 次带梯度前向 + 1 次反向（无目标判断前向）；
+    越界目标仍明确报错（校验延迟到带梯度前向之后，不额外前向）。"""
+    import torch.nn as _nn
+
+    class _CountModel(_nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = _nn.Conv2d(1, 4, 3, padding=1)
+            self.pool = _nn.AdaptiveAvgPool2d(1)
+            self.fc = _nn.Linear(4, 7)
+            self.forward_calls = 0
+            self.backward_calls = 0
+
+        def forward(self, x):
+            self.forward_calls += 1
+            x = torch.relu(self.conv(x))
+            x = self.pool(x).flatten(1)
+            out = self.fc(x)
+            if torch.is_grad_enabled() and out.requires_grad:
+                out.register_hook(self._on_bwd)
+            return out
+
+        def _on_bwd(self, _grad):
+            self.backward_calls += 1
+
+    torch.manual_seed(0)
+    model = _CountModel()
+    model.eval()
+    image = Image.fromarray(np.zeros((48, 48), dtype=np.uint8), mode="L")
+
+    heatmap = generate_gradcam(model, image, "cpu", target_class=2)
+    assert model.forward_calls == 1, "target_class 已给定时不应再有目标判断前向"
+    assert model.backward_calls == 1
+    assert heatmap.shape == (48, 48)
+    assert not model.training, "调用后应保持 eval 状态恢复语义"
+
+    before = model.forward_calls
+    with pytest.raises(ValueError, match="超出"):
+        generate_gradcam(model, image, "cpu", target_class=7)
+    assert model.forward_calls == before + 1, "越界报错同样不应有额外目标判断前向"
+
+
+# ============================================================
+# PB05 · 评估快速路径（uint8 缓存输入）与旧解析路径一致
+# ============================================================
+@_skip_no_ckpt
+def test_predict_probs_fast_matches_legacy_cpu():
+    """PB05：CPU 上 _predict_probs_fast 与 _predict_probs 的逐样本概率逐位一致。"""
+    from utils.evaluation import _predict_probs, _predict_probs_fast
+
+    model, device, _ = load_model(str(LEGACY_CKPT), device="cpu")
+    sub = _private_test_frame().iloc[:11]
+    probs_old, labels_old = _predict_probs(model, sub, batch_size=5, device=torch.device("cpu"))
+
+    pixels = np.stack([
+        np.array(s.split(), dtype=np.uint8).reshape(48, 48) for s in sub["pixels"]
+    ])
+    probs_new = _predict_probs_fast(model, pixels, batch_size=5, device=torch.device("cpu"))
+
+    assert np.array_equal(probs_new, probs_old), "快速路径应与旧路径逐位一致"
+    assert np.array_equal(labels_old, sub["emotion"].to_numpy())
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="需要 CUDA")
+@_skip_no_ckpt
+def test_predict_probs_fast_matches_legacy_gpu():
+    """PB05：GPU 上（pinned + non_blocking + 单次回传）概率与旧路径逐位一致。"""
+    from utils.evaluation import _predict_probs, _predict_probs_fast
+
+    model, device, _ = load_model(str(LEGACY_CKPT), device="cuda")
+    sub = _private_test_frame().iloc[:11]
+    probs_old, _ = _predict_probs(model, sub, batch_size=5, device=torch.device("cuda"))
+
+    pixels = np.stack([
+        np.array(s.split(), dtype=np.uint8).reshape(48, 48) for s in sub["pixels"]
+    ])
+    probs_new = _predict_probs_fast(model, pixels, batch_size=5, device=torch.device("cuda"))
+
+    assert np.array_equal(probs_new, probs_old), "GPU 快速路径应与旧路径逐位一致"
+

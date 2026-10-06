@@ -28,7 +28,6 @@ from data.dataloader import create_dataloaders
 from training.checkpoint import find_resume_checkpoint
 from training.trainer import (
     Trainer,
-    enforce_exact_resume_conditions,
     load_config,
     set_seed,
 )
@@ -104,9 +103,10 @@ def main():
     deterministic = bool(config["training"].get("cudnn_deterministic", False))
     set_seed(seed, deterministic=deterministic)
 
-    # ---- 恢复解析（R01：先调整数据加载条件，再构建 DataLoader）----
+    # ---- 恢复解析（先确定断点，再按同一配置构建 DataLoader）----
+    # 注：精确恢复要求恢复端的数据管线规格（workers/persistent/sampler）与断点
+    # 完全一致；加载时自动校验，不满足会在加载前明确拒绝（S01）
     resume_path = None
-    resume_conditions = None
     if args.resume:
         if args.resume == "auto":
             resume_path = find_resume_checkpoint(model_name)
@@ -118,9 +118,6 @@ def main():
             resume_path = Path(args.resume)
             if not resume_path.exists():
                 raise SystemExit(f"错误: checkpoint 不存在: {resume_path}")
-    if resume_path is not None:
-        resume_conditions = enforce_exact_resume_conditions(config)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_config = config["models"][model_name]
     activation = model_config.get("activation", config["training"]["activation"])
@@ -135,10 +132,12 @@ def main():
     print(f"{'=' * 60}\n")
 
     # ---- 数据 ----
-    train_loader, val_loader, test_loader, _ = create_dataloaders(config, model_name)
+    # PrivateTest 不在训练启动时构建（PB02）：训练不使用 test_loader，
+    # 统一评估入口按需加载（tools/evaluate_checkpoint.py / utils.evaluation）
+    train_loader, val_loader, _, _ = create_dataloaders(config, model_name, include_test=False)
     print(f"  训练集: {len(train_loader.dataset)} | "
-          f"验证集: {len(val_loader.dataset)} | "
-          f"测试集: {len(test_loader.dataset)}")
+          f"验证集: {len(val_loader.dataset)}")
+    print("  PrivateTest: 未构建（评估时按需加载）")
 
     # ---- 模型（统一构造入口 F01）----
     spec = make_spec_from_config(config, model_name)
@@ -158,7 +157,7 @@ def main():
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
-            test_loader=test_loader,
+            test_loader=None,
             config=config,
             model_name=model_name,
             device=device,
@@ -174,13 +173,13 @@ def main():
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        test_loader=test_loader,
+        test_loader=None,
         config=config,
         model_name=model_name,
         device=device,
         class_counts=train_loader.dataset.class_counts,
         run_dir=run_dir,
-        run_meta_extra={"cli_args": vars(args), "resume_conditions": resume_conditions},
+        run_meta_extra={"cli_args": vars(args)},
     )
 
     print(f"  参数量: {trainer.total_params:,}\n")

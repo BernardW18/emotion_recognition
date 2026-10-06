@@ -25,10 +25,16 @@
   权重/划分哈希（全部可复算，含 ECE/NLL）。
 - **显式导出 + 来源清单**：`tools/export_model.py` 导出到推理目录并登记
   `export_manifest.json`（run、SHA-256、model_spec、指标），默认不覆盖同名文件。
-- **恢复保护**：恢复训练前逐项比对训练协议（损失/采样/增强/batch/优化器/调度器/
-  monitor/精度/数据指纹），配置或数据变化将被拒绝（换策略请新建 run）；
-  精确恢复（与连续训练逐批一致）的实测支持范围为 `num_workers=0`。
-- **质量门槛**：pytest（112 项）+ ruff + mypy 全部通过。
+- **恢复保护（S01/S02）**：训练协议为**完整生效配置快照 + 运行时有效值 + 数据指纹**，
+  恢复前整表比对，任何影响训练状态的配置/数据变化都会被拒绝（换策略请新建 run）；
+  **精确恢复（与连续训练逐批一致）支持 `workers=0` 或 `workers≥1` 且
+  `persistent_workers=false`**（独立 generator 复算批次序列与 worker 种子），
+  `persistent_workers=true` 明确拒绝；中断后同实例继续会自动回滚到完整 last。
+- **性能（PB01–PB05）**：批级张量增强（`augmentation.impl`，同分布实测提速
+  88.4%（workers=0）/ 39.0%（workers=4））；uint8 像素缓存（工厂加载 8.7→0.24s，逐位一致）；
+  评估快速路径（完整评估 -96.0%）；Grad-CAM 按需 + 缓存（命中 -92.6%~-95.5%）；
+  fused Adam 为可选项（默认关，实测 ~4.9–5.2%）。
+- **质量门槛**：pytest（197 项）+ ruff + mypy（全项目 42 个源文件 0 错误）全部通过。
 
 ---
 
@@ -38,6 +44,7 @@
 emotion_recognition/
 ├── data/                        # 数据集（需手动下载）
 │   ├── fer2013.csv              # FER2013 CSV（不纳入版本控制）
+│   ├── cache/                   # uint8 像素缓存（可重建派生物，不纳入版本控制）
 │   └── README.md
 ├── models/                      # CNN 模型定义（可配置激活函数）
 │   ├── mini_cnn.py              # 基线模型（1,274,823 参数）
@@ -52,6 +59,7 @@ emotion_recognition/
 │   ├── checkpoints/  logs/      # legacy 历史产物（只读保留，信息不全）
 ├── inference/                   # 推理演示应用
 │   ├── app.py                   # Streamlit 应用
+│   ├── service.py               # 缓存化分析服务（PB04：按需 Grad-CAM + LRU 缓存）
 │   ├── infer_utils.py           # 推理工具（统一加载、预处理、Grad-CAM）
 │   └── saved_models/            # 推理权重 + export_manifest.json
 ├── utils/                       # 公共工具模块
@@ -80,7 +88,7 @@ emotion_recognition/
 │   └── confusion_matrices/  roc_curves/  training_curves/
 ├── docs/
 │   └── data_audit.md            # 数据重复披露与去重协议草案
-├── tests/                       # 测试（112 项：核心/训练管线/推理/应用/配置校验）
+├── tests/                       # 测试（197 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused）
 ├── pyproject.toml               # 项目配置 + ruff + mypy
 ├── requirements.txt             # 依赖安装入口（CUDA 组合）
 └── README.md
@@ -145,10 +153,12 @@ Checkpoint 选择器（列出 `training/runs/` 下的可续训断点）。
 - **产物**：`training/runs/<模型>/<run_id>/`：`config_effective.yaml`、`run_meta.json`
   （CLI 参数 / seed / git / 环境 / 数据指纹 / 状态 / 恢复事件）、`history.json`、
   `checkpoints/{last,best,epoch_*,interrupted_*}.pth`。
-- **精确续训的支持范围**：`num_workers=0`（单进程数据管线；批次顺序与增强随机性由
-  可保存/恢复的 RNG 驱动，回归测试覆盖普通/增强/加权采样组合）。恢复训练时若配置为
-  多进程，会自动调整为 0 并记录在 `run_meta.resume_events`；多进程数据管线下的恢复
-  一致性不作承诺。恢复前比对训练协议，任何配置/数据变化都会被拒绝。
+- **精确续训的支持范围（S01 实测）**：`num_workers=0`，或 `workers≥1` 且
+  `persistent_workers=false`（训练 sampler / DataLoader 使用独立 generator，
+  其状态随断点保存/恢复，批次序列与 worker 种子可复算——回归覆盖普通/增强/
+  加权采样组合）。`persistent_workers=true` 不提供精确恢复（启动时提示、加载时拒绝）。
+  恢复端的数据管线规格（workers/persistent/sampler/batch）必须与断点一致；
+  训练协议（完整生效配置 + 数据指纹）任一变化都会被拒绝。
 
 ### 4. 评估
 
@@ -269,6 +279,8 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 | 早停 | val_acc 无改善 + val_loss 恶化双监控（=0 禁用） |
 | Checkpoint | save_best / monitor_metric(val_acc/val_loss) / 定期断点清理 |
 | 确定性 | cudnn_deterministic（由配置决定，代码不再强制覆盖） |
+| 增强实现 | `augmentation.impl`：legacy（逐样本）/ **batched（批级张量，默认）**；同分布，随机序列不同 |
+| fused Adam | `training.optimizer_fused`（仅 CUDA + Adam；默认关，为可选项） |
 
 ---
 
@@ -279,19 +291,22 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 - **数据分析**: Jupyter Notebook + Pandas + Matplotlib + Seaborn
 - **评估**: scikit-learn（混淆矩阵 / ROC / 分类报告）+ 自实现 ECE/NLL
 - **可解释性**: Grad-CAM 热力图（纯手写，无第三方依赖）
-- **质量保证**: pytest（112 项）+ ruff + mypy（全部通过）
+- **质量保证**: pytest（197 项通过）+ ruff（通过）+ mypy（全项目 42 源文件 0 错误）
 
 ## 项目状态与限制
 
-- 本轮（2026-10）为**修复与整理轮**：完成正确性/可复现性修复、统一评估、
-  质量门槛与材料同步；**未重新训练模型**，上表数字来自历史权重（legacy，信息不全，
-  已有明确标注与迁移说明）。
+- 本轮（2026-10）为**修复、整理与性能优化轮**：统一评估 + 工程修复 + 续训可靠性
+  返修（S01–S05）与性能专项（PB01–PB05）均已实施并验收，实测数字与边界见
+  [PROJECT_REVIEW.md](PROJECT_REVIEW.md)（如批级增强为同分布实现、非逐位等价）；
+  **未进行正式重训**，上表数字来自历史权重（legacy，信息不全，已有明确标注与迁移说明）。
+- 性能摘要：工厂加载 8.7→0.24s、批级增强 88.4%/39.0%（w0/w4）、完整评估 -96.0%、
+  Grad-CAM 命中 -92.6%~-95.5%；fused Adam 未达稳定 ≥5% 目标，保留为可选项（默认 false）。
 - `training/checkpoints/`、`training/logs/` 为 legacy 历史产物（只读保留），
   新训练一律写入 `training/runs/`。
-- 2026-10-07 完成两次**流程验证短训练**（mini_cnn：`20261007_022921_seed42` 与
-  `20261007_031251_seed42`，各 2 epochs：训练 → `--resume auto` 续训（含精确恢复
-  条件调整与记录）→ 导出 → 统一评估）。两个 run 仅验证保存/恢复/导出/评估闭环可用；
-  其分数（PublicTest 34.63% / 36.89%）**不代表正式结果**，已在 export_manifest 中标注来源。
-- 课程报告 DOCX / PPT **未修改**（用户决定拒绝修改 word/ppt，可询问用户核实）；
-  个人贡献清单未单独成文。
-- 课程报告 DOCX / PPT 本轮未同步（如需可基于本 README 与 `docs/` 更新）。
+- 2026-10-07 完成三次**流程验证短训练**（mini_cnn：`20261007_022921_seed42`、
+  `20261007_031251_seed42`、`20261007_041818_seed42`；第三个在统一预算下验证
+  **4 workers（non-persistent）精确恢复**全链路：训练 → `--resume auto`（未降级、
+  协议校验通过）→ 导出 → PublicTest 评估）。三者仅验证保存/恢复/导出/评估闭环可用，
+  其评估分数（34.63% / 36.89% / 44.13%）**不代表正式结果**，已在 export_manifest 中标注来源。
+- 本项目由作者个人独立完成，无组员分工，不另列个人贡献清单；课程报告 DOCX / PPT 不再修改。
+- 当前独立审核与性能分析见 [PROJECT_REVIEW.md](PROJECT_REVIEW.md)，未完成项按该文档验收。

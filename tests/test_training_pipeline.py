@@ -24,7 +24,6 @@ import hashlib
 import random
 
 import numpy as np
-import pandas as pd
 import pytest
 import torch
 import torch.nn as nn
@@ -88,7 +87,7 @@ def _make_config(seed=42):
 
 
 def _make_trainer(config, model=None, loader=None, val_loader=None, run_dir=None,
-                  focal_gamma=2.0):
+                  focal_gamma=2.0, model_name="mini_cnn"):
     if model is None:
         torch.manual_seed(config["seed"])
         model = nn.Linear(4, 3)
@@ -102,7 +101,7 @@ def _make_trainer(config, model=None, loader=None, val_loader=None, run_dir=None
         val_loader=val_loader,
         test_loader=val_loader,
         config=config,
-        model_name="mini_cnn",
+        model_name=model_name,
         device=torch.device("cpu"),
         run_dir=run_dir,
         focal_gamma=focal_gamma,
@@ -257,15 +256,39 @@ def _tiny_image_data(n=16, seed=0):
     return TensorDataset(x, y)
 
 
-def _resume_env(tmp_path, run_name, *, augmentation=False, balanced_sampling=False, seed=11):
-    """构造恢复一致性测试环境（R01：支持增强 / 加权采样组合）。"""
+def _resume_env(tmp_path, run_name, *, augmentation=False, balanced_sampling=False,
+                seed=11, workers=0, persistent=False, batched_augmentation=False):
+    """构造恢复一致性测试环境（S01：workers=0 与 non-persistent 多 worker；
+    与 create_dataloaders 一致——训练 sampler/DataLoader 使用独立 generator）。
+
+    batched_augmentation=True（PB01）：dataset 不带逐样本 transform，
+    批级增强由 Trainer 训练循环按 (seed, epoch, batch_idx) 复算执行。
+    """
     config = _make_config(seed=seed)
     config["training"]["scheduler"] = "cosine"
     config["models"]["mini_cnn"]["num_epochs"] = 2
     torch.manual_seed(seed)
     model = nn.Sequential(nn.Flatten(), nn.Linear(64, 3))
     base = _tiny_image_data(n=16, seed=5)
-    if augmentation:
+    if batched_augmentation:
+        # PB01：批级增强——dataset 无 transform，增强在 Trainer 训练循环执行
+        config["augmentation"] = {
+            "enabled": True,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 15,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": True,
+            "class_specific": {
+                "enabled": True, "target_classes": [1], "augment_prob": 0.8,
+                "extra_rotation": 20, "extra_translate": 0.15, "extra_erase_prob": 0.2,
+            },
+            "mixup": {"enabled": False},
+        }
+        dataset = base
+    elif augmentation:
         from torchvision import transforms
 
         dataset = _TransformDataset(base, transforms.Compose([
@@ -274,13 +297,23 @@ def _resume_env(tmp_path, run_name, *, augmentation=False, balanced_sampling=Fal
         ]))
     else:
         dataset = base
+
+    # S01：独立生成器（sampler 负责批次索引序列；loader 负责 worker base_seed）
+    g_sampler = torch.Generator().manual_seed(seed)
+    g_loader = torch.Generator().manual_seed(seed + 12345)
+    loader_kwargs: dict = dict(batch_size=4, num_workers=workers, generator=g_loader)
+    if workers > 0:
+        loader_kwargs["persistent_workers"] = persistent
+        loader_kwargs["prefetch_factor"] = 2
+
     if balanced_sampling:
         sampler = torch.utils.data.WeightedRandomSampler(
-            weights=[1.0] * len(dataset), num_samples=len(dataset), replacement=True,
+            weights=[1.0] * len(dataset), num_samples=len(dataset),
+            replacement=True, generator=g_sampler,
         )
-        loader = SpyLoader(DataLoader(dataset, batch_size=4, sampler=sampler))
+        loader = SpyLoader(DataLoader(dataset, sampler=sampler, **loader_kwargs))
     else:
-        loader = SpyLoader(DataLoader(dataset, batch_size=4, shuffle=True))
+        loader = SpyLoader(DataLoader(dataset, shuffle=True, **loader_kwargs))
     val_loader = DataLoader(_tiny_image_data(n=16, seed=6), batch_size=4)
     trainer = Trainer(
         model=model, train_loader=loader, val_loader=val_loader,
@@ -290,14 +323,17 @@ def _resume_env(tmp_path, run_name, *, augmentation=False, balanced_sampling=Fal
     return trainer, loader
 
 
+@pytest.mark.parametrize("workers", [0, 2], ids=["w0", "w2"])
 @pytest.mark.parametrize(
     "augmentation,balanced_sampling",
     [(False, False), (True, False), (False, True), (True, True)],
     ids=["plain", "augmentation", "weighted_sampler", "aug_and_sampler"],
 )
-def test_resume_matches_continuous(tmp_path, augmentation, balanced_sampling):
-    """连续两轮 == 一轮保存后恢复再一轮（R01：逐批输入哈希 + 参数 + history + best + 计数）。"""
-    kwargs = {"augmentation": augmentation, "balanced_sampling": balanced_sampling}
+def test_resume_matches_continuous(tmp_path, augmentation, balanced_sampling, workers):
+    """连续两轮 == 一轮保存后恢复再一轮（S01：workers=0 与 non-persistent 多 worker；
+    逐批输入哈希 + 参数 + history + best + 计数）。"""
+    kwargs = {"augmentation": augmentation, "balanced_sampling": balanced_sampling,
+              "workers": workers}
 
     # A：连续两轮
     ta, la = _resume_env(tmp_path, "continuous", **kwargs)
@@ -330,6 +366,83 @@ def test_resume_matches_continuous(tmp_path, augmentation, balanced_sampling):
     # 参数一致
     for p_a, p_b in zip(ta.model.parameters(), tb2.model.parameters(), strict=True):
         assert torch.allclose(p_a, p_b, atol=1e-6, rtol=1e-5)
+
+
+# ============================================================
+# PB01 · batched 批级增强下的恢复一致性（连续 vs 恢复）
+# ============================================================
+def _wrap_augmenter_spy(trainer):
+    """包装 trainer.batch_augmenter：记录 (epoch, batch_idx, 增强输出哈希)。"""
+    aug = trainer.batch_augmenter
+    assert aug is not None
+    records = []
+
+    class _Spy:
+        def __call__(self, images, labels, *, epoch, batch_idx):
+            out = aug(images, labels, epoch=epoch, batch_idx=batch_idx)
+            h = hashlib.sha256(out.detach().numpy().tobytes()).hexdigest()
+            records.append((int(epoch), int(batch_idx), h))
+            return out
+
+    trainer.batch_augmenter = _Spy()
+    return records
+
+
+@pytest.mark.parametrize("workers", [0, 2], ids=["w0", "w2"])
+def test_resume_matches_continuous_batched_augmentation(tmp_path, workers):
+    """PB01：batched 增强下连续 == 恢复——逐批增强输出哈希逐位一致 + 模型参数一致。
+
+    增强参数由 (seed, epoch, batch_idx) 复算；批次内容由 S01 的 sampler/loader
+    generator 状态恢复保证。
+    """
+    # A：连续两轮（epoch 1、2）
+    ta, _ = _resume_env(tmp_path, "bcont", batched_augmentation=True, workers=workers)
+    ra = _wrap_augmenter_spy(ta)
+    ta.fit(2)
+
+    # B：一轮 → 保存 → 恢复 → 再一轮（恢复后执行 epoch 2）
+    tb, _ = _resume_env(tmp_path, "bres", batched_augmentation=True, workers=workers)
+    _wrap_augmenter_spy(tb)
+    tb.fit(1)
+    last_ckpt = tb.checkpoints_dir / "last.pth"
+    assert last_ckpt.exists()
+
+    tb2, _ = _resume_env(tmp_path, "bres", batched_augmentation=True, workers=workers)
+    rb2 = _wrap_augmenter_spy(tb2)
+    tb2.load_checkpoint(last_ckpt)
+    assert tb2.start_epoch == 2
+    tb2.fit(1)
+
+    epoch2_a = [(b, h) for (e, b, h) in ra if e == 2]
+    epoch2_b = [(b, h) for (e, b, h) in rb2 if e == 2]
+    assert len(epoch2_a) == len(epoch2_b) == 4
+    assert epoch2_a == epoch2_b, "恢复后第二轮的逐批增强输出与连续训练不一致"
+
+    for p_a, p_b in zip(ta.model.parameters(), tb2.model.parameters(), strict=True):
+        assert torch.allclose(p_a, p_b, atol=1e-6, rtol=1e-5)
+
+
+def test_trainer_rejects_batched_impl_with_dataset_transform(tmp_path):
+    """PB01：impl=batched 且数据集仍带逐样本 transform → 拒绝（防双重增强）。"""
+    from torchvision import transforms
+
+    config = _make_config(seed=11)
+    config["augmentation"].update({
+        "enabled": True, "impl": "batched", "random_horizontal_flip": 0.5,
+    })
+    dataset = _TransformDataset(
+        _tiny_image_data(n=16, seed=5),
+        transforms.Compose([transforms.RandomHorizontalFlip()]),
+    )
+    loader = DataLoader(dataset, batch_size=4, shuffle=False)
+    model = nn.Sequential(nn.Flatten(), nn.Linear(64, 3))
+    with pytest.raises(ValueError, match="双重增强"):
+        Trainer(
+            model=model, train_loader=loader,
+            val_loader=DataLoader(_tiny_image_data(n=16, seed=6), batch_size=4),
+            test_loader=None, config=config, model_name="mini_cnn",
+            device=torch.device("cpu"), run_dir=tmp_path / "x",
+        )
 
 
 def test_early_stop_state_roundtrip(tmp_path):
@@ -509,11 +622,11 @@ def test_compute_class_counts_fixed_index():
 def test_sampler_weights_use_class_counts():
     from data.dataloader import _compute_sampler_weights
 
-    df = pd.DataFrame({"emotion": [0, 0, 0, 1]})
-    weights = _compute_sampler_weights(df, num_classes=2, class_counts=[3, 1])
+    labels = np.array([0, 0, 0, 1])
+    weights = _compute_sampler_weights(labels, num_classes=2, class_counts=[3, 1])
     assert weights == pytest.approx([4 / 6, 4 / 6, 4 / 6, 4 / 2])
     with pytest.raises(ValueError, match="样本数为 0"):
-        _compute_sampler_weights(df, num_classes=2, class_counts=[4, 0])
+        _compute_sampler_weights(labels, num_classes=2, class_counts=[4, 0])
 
 
 def test_cb_focal_rejects_zero_count():
@@ -525,29 +638,16 @@ def test_cb_focal_rejects_zero_count():
 # ============================================================
 # R01 · 精确恢复支持范围（审计第二轮）
 # ============================================================
-def test_enforce_exact_resume_conditions():
-    from training.trainer import enforce_exact_resume_conditions
-
-    cfg = {"dataloader": {"num_workers": 4, "persistent_workers": True}}
-    info = enforce_exact_resume_conditions(cfg)
-    assert cfg["dataloader"]["num_workers"] == 0
-    assert cfg["dataloader"]["persistent_workers"] is False
-    assert info["adjusted"] is True and info["original_num_workers"] == 4
-
-    cfg2 = {"dataloader": {"num_workers": 0}}
-    info2 = enforce_exact_resume_conditions(cfg2)
-    assert info2["adjusted"] is False
-
-
-def test_load_checkpoint_rejects_multi_worker_loader(tmp_path):
+def test_load_checkpoint_rejects_worker_loader_without_generator(tmp_path):
+    """多进程恢复端缺少独立 generator：无法复算批次序列，精确恢复拒绝（S01）。"""
     config = _make_config()
     t = _make_trainer(config, run_dir=tmp_path / "base")
     path = t.checkpoints_dir / "last.pth"
     t.save_checkpoint(path)
 
     t2 = _make_trainer(config, run_dir=tmp_path / "resume")
-    t2.train_loader.num_workers = 2  # 模拟多进程数据管线
-    with pytest.raises(RuntimeError, match="num_workers=0"):
+    t2.train_loader.num_workers = 2  # 多进程但未配置独立 generator
+    with pytest.raises(RuntimeError, match="generator"):
         t2.load_checkpoint(path)
 
 
@@ -572,16 +672,64 @@ def test_resume_success_records_event(tmp_path):
 # ============================================================
 # R02 · 恢复前训练协议比对（换配置不得续写原 run）
 # ============================================================
+# S02 完整字段表变更检查：每项单独变更必须被拒绝（防“只加 6 个特判”）。
+# 前三组：审计第二轮实测的 6 项遗漏；其余为训练状态字段抽检。
+_PROTOCOL_MUTATIONS = [
+    ("random_rotation",
+     lambda c: c["augmentation"].update(random_rotation=25), "random_rotation"),
+    ("target_classes",
+     lambda c: c["augmentation"]["class_specific"].update(target_classes=[2]), "target_classes"),
+    ("max_grad_norm",
+     lambda c: c["training"].update(max_grad_norm=0.25), "max_grad_norm"),
+    ("patience",
+     lambda c: c["training"].update(patience=3), "patience"),
+    ("val_loss_threshold",
+     lambda c: c["training"].update(val_loss_threshold=1.2), "val_loss_threshold"),
+    ("scheduler_t0",
+     lambda c: c["training"].update(scheduler_t0=8), "scheduler_t0"),
+    ("scheduler",
+     lambda c: c["training"].update(scheduler="cosine"), "scheduler"),
+    ("cudnn_deterministic",
+     lambda c: c["training"].update(cudnn_deterministic=True), "cudnn_deterministic"),
+    ("optimizer",
+     lambda c: c["training"].update(optimizer="sgd"), "optimizer"),
+    ("weight_decay",
+     lambda c: c["training"].update(weight_decay=1e-3), "weight_decay"),
+    ("val_loss_patience",
+     lambda c: c["training"].update(val_loss_patience=3), "val_loss_patience"),
+    ("grad_accum",
+     lambda c: c["training"].update(gradient_accumulation_steps=2),
+     "gradient_accumulation_steps"),
+    ("loss_type",
+     lambda c: c["training"].update(loss_type="cross_entropy"), "loss"),
+    ("lr",
+     lambda c: c["models"]["mini_cnn"].update(learning_rate=1e-3), "learning_rate"),
+    ("monitor_metric",
+     lambda c: c["checkpoint"].update(monitor_metric="val_loss"), "monitor_metric"),
+    ("save_best",
+     lambda c: c["checkpoint"].update(save_best=False), "save_best"),
+    ("class_balanced_sampling",
+     lambda c: c["dataloader"].update(class_balanced_sampling=True), "class_balanced_sampling"),
+    ("aug_master",
+     lambda c: c["augmentation"].update(enabled=True), "augmentation"),
+    ("aug_flip",
+     lambda c: c["augmentation"].update(random_horizontal_flip=0.4), "random_horizontal_flip"),
+    ("aug_impl",
+     lambda c: c["augmentation"].update(impl="batched"), "impl"),
+    ("mixup_alpha",
+     lambda c: c["augmentation"]["mixup"].update(alpha=0.5), "alpha"),
+    ("class_aug_prob",
+     lambda c: c["augmentation"]["class_specific"].update(extra_erase_prob=0.5),
+     "extra_erase_prob"),
+    ("seed",
+     lambda c: c.update(seed=99), "seed"),
+]
+
+
 @pytest.mark.parametrize(
     "mutate,match",
-    [
-        (lambda c: c["training"].update(scheduler="cosine"), "scheduler"),
-        (lambda c: c["training"].update(cudnn_deterministic=True), "cudnn_deterministic"),
-        (lambda c: c["checkpoint"].update(monitor_metric="val_loss"), "monitor_metric"),
-        (lambda c: c["dataloader"].update(class_balanced_sampling=True),
-         "class_balanced_sampling"),
-        (lambda c: c["augmentation"].update(enabled=True), "augmentation"),
-    ],
+    [(f, mm) for _, f, mm in _PROTOCOL_MUTATIONS],
+    ids=[i for i, _, _ in _PROTOCOL_MUTATIONS],
 )
 def test_resume_rejects_protocol_change(tmp_path, mutate, match):
     config = _make_config()
@@ -604,7 +752,7 @@ def test_resume_rejects_batch_size_change(tmp_path):
 
     loader = DataLoader(_tiny_data(), batch_size=3, shuffle=False)
     t2 = _make_trainer(config, loader=loader, run_dir=tmp_path / "resume")
-    with pytest.raises(RuntimeError, match="train_batch_size"):
+    with pytest.raises(RuntimeError, match="batch_size"):
         t2.load_checkpoint(path)
 
 
@@ -679,16 +827,21 @@ class _TinyBNNet(nn.Module):
         return self.fc(x)
 
 
-def _state_equal(a, b) -> bool:
+def _state_equal(a: object, b: object) -> bool:
+    """递归比较状态对象（dict/list/tuple/Tensor/标量），显式 bool 返回（S05）。"""
     if isinstance(a, dict):
+        if not isinstance(b, dict):
+            return False
         return a.keys() == b.keys() and all(_state_equal(a[k], b[k]) for k in a)
     if isinstance(a, (list, tuple)):
+        if not isinstance(b, (list, tuple)):
+            return False
         return len(a) == len(b) and all(
             _state_equal(x, y) for x, y in zip(a, b, strict=True)
         )
     if isinstance(a, torch.Tensor):
-        return torch.equal(a, b)
-    return a == b
+        return isinstance(b, torch.Tensor) and bool(torch.equal(a, b))
+    return bool(a == b)
 
 
 def test_diagnose_does_not_touch_training_state(tmp_path):
@@ -977,3 +1130,222 @@ def test_baseline_config_differs_only_in_three_fields():
     m["augmentation"]["class_specific"]["enabled"] = "X"
     b["augmentation"]["class_specific"]["enabled"] = "X"
     assert m == b, "baseline_config.yaml 与主配置出现了三处以外的差异（需同步）"
+
+# ============================================================
+# S01 · 完整方案：多 worker + 独立 generator 的精确恢复
+# ============================================================
+def _persistent_loader_env(tmp_path, run_name, *, persistent=True, seed=41):
+    """构造 persistent/非 persistent 多 worker 的 Trainer（手工 loader + generators）。"""
+    config = _make_config(seed=seed)
+    torch.manual_seed(seed)
+    model = nn.Sequential(nn.Flatten(), nn.Linear(64, 3))
+    g_sampler = torch.Generator().manual_seed(seed)
+    g_loader = torch.Generator().manual_seed(seed + 12345)
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights=[1.0] * 16, num_samples=16, replacement=True, generator=g_sampler,
+    )
+    loader = DataLoader(
+        _tiny_image_data(n=16, seed=5), batch_size=4, sampler=sampler,
+        num_workers=2, persistent_workers=persistent, prefetch_factor=2,
+        generator=g_loader,
+    )
+    val_loader = DataLoader(_tiny_image_data(n=16, seed=6), batch_size=4)
+    trainer = Trainer(
+        model=model, train_loader=loader, val_loader=val_loader,
+        test_loader=val_loader, config=config, model_name="mini_cnn",
+        device=torch.device("cpu"), run_dir=tmp_path / run_name,
+    )
+    return trainer, loader
+
+
+def test_resume_rejects_persistent_workers_checkpoint(tmp_path):
+    """persistent_workers=True 的断点：精确恢复明确拒绝（worker RNG 不可复算）。"""
+    t, _ = _persistent_loader_env(tmp_path, "persist_src", persistent=True)
+    path = t.checkpoints_dir / "last.pth"
+    t.save_checkpoint(path)
+
+    t2, _ = _persistent_loader_env(tmp_path, "persist_dst", persistent=False)
+    with pytest.raises(RuntimeError, match="persistent_workers"):
+        t2.load_checkpoint(path)
+
+
+def test_resume_rejects_persistent_workers_on_resume_side(tmp_path):
+    """恢复端 persistent_workers=True：明确拒绝。"""
+    t, _ = _persistent_loader_env(tmp_path, "np_src", persistent=False)
+    path = t.checkpoints_dir / "last.pth"
+    t.save_checkpoint(path)
+
+    t2, _ = _persistent_loader_env(tmp_path, "np_dst", persistent=True)
+    with pytest.raises(RuntimeError, match="persistent_workers"):
+        t2.load_checkpoint(path)
+
+
+def test_resume_rejects_different_worker_count(tmp_path):
+    """源 2 workers → 恢复端 0 workers：协议（数据管线规格）不一致，拒绝。"""
+    ta, _ = _resume_env(tmp_path, "src_w2", workers=2)
+    path = ta.checkpoints_dir / "last.pth"
+    ta.save_checkpoint(path)
+
+    tb, _ = _resume_env(tmp_path, "dst_w0", workers=0)
+    with pytest.raises(RuntimeError, match="num_workers"):
+        tb.load_checkpoint(path)
+
+
+def test_resume_rejects_legacy_or_incomplete_protocol(tmp_path):
+    """旧断点（无协议 / 旧协议版本 / 缺 loader_rng）：精确恢复一律拒绝。"""
+    config = _make_config()
+    t = _make_trainer(config, run_dir=tmp_path / "base")
+    path = t.checkpoints_dir / "last.pth"
+    t.save_checkpoint(path)
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+
+    # 负例 1：无 training_protocol（旧版本断点）
+    c1 = copy.deepcopy(ckpt)
+    c1.pop("training_protocol")
+    p1 = tmp_path / "no_protocol.pth"
+    torch.save(c1, p1)
+    t2 = _make_trainer(config, run_dir=tmp_path / "r2")
+    with pytest.raises(RuntimeError, match="training_protocol"):
+        t2.load_checkpoint(p1)
+
+    # 负例 2：协议版本回退
+    c2 = copy.deepcopy(ckpt)
+    c2["training_protocol"] = dict(c2["training_protocol"])
+    c2["training_protocol"]["protocol_version"] = 1
+    p2 = tmp_path / "old_version.pth"
+    torch.save(c2, p2)
+    with pytest.raises(RuntimeError, match="协议版本"):
+        t2.load_checkpoint(p2)
+
+    # 负例 3：缺 loader_rng
+    c3 = copy.deepcopy(ckpt)
+    c3.pop("loader_rng")
+    p3 = tmp_path / "no_loader_rng.pth"
+    torch.save(c3, p3)
+    with pytest.raises(RuntimeError, match="loader_rng"):
+        t2.load_checkpoint(p3)
+
+
+# ============================================================
+# S02 · 白名单与加载后调度器一致性
+# ============================================================
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda c: c["checkpoint"].update(save_every_n_epochs=7),
+        lambda c: c["checkpoint"].update(max_checkpoint_files=3),
+        lambda c: c["dataloader"].update(prefetch_factor=4),
+        lambda c: c["dataloader"].update(pin_memory=True),
+    ],
+    ids=["save_every", "max_files", "prefetch", "pin_memory"],
+)
+def test_resume_allows_whitelisted_changes(tmp_path, mutate):
+    """白名单字段（显示/输出/内存选项）变化不影响精确恢复。"""
+    config = _make_config()
+    t = _make_trainer(config, run_dir=tmp_path / "base")
+    path = t.checkpoints_dir / "last.pth"
+    t.save_checkpoint(path)
+
+    changed = copy.deepcopy(config)
+    mutate(changed)
+    t2 = _make_trainer(changed, run_dir=tmp_path / "resume")
+    t2.load_checkpoint(path)  # 不应抛异常
+    # 断点为“从未训练”的初始保存（epoch=0）：恢复后从第 1 轮继续
+    assert t2.start_epoch == 1
+
+
+def test_resume_scheduler_effective_matches_record(tmp_path):
+    """加载后实际调度器参数与断点协议记录逐项一致（S02 验收）。"""
+    from training.checkpoint import scheduler_effective_dict
+
+    config = _make_config()
+    config["training"]["scheduler"] = "cosine"
+    t = _make_trainer(config, run_dir=tmp_path / "base")
+    path = t.checkpoints_dir / "last.pth"
+    t.save_checkpoint(path)
+
+    t2 = _make_trainer(config, run_dir=tmp_path / "resume")
+    t2.load_checkpoint(path)
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    recorded = ckpt["training_protocol"]["runtime"]["scheduler_effective"]
+    assert scheduler_effective_dict(t2.scheduler) == recorded
+
+
+# ============================================================
+# S03 · 中断后同实例继续：自动回滚到完整 last
+# ============================================================
+def _partial_update_then_ki(trainer, n_batches=1):
+    """返回一个替换 train_one_epoch 的函数：完成 n 个真实 batch 更新后抛 KI。"""
+    def run():
+        trainer.model.train()
+        loader_iter = iter(trainer.train_loader)
+        for _ in range(n_batches):
+            images, labels = next(loader_iter)
+            out = trainer.model(images)
+            loss = trainer.criterion(out, labels)
+            loss.backward()
+            trainer.optimizer.step()
+            trainer.optimizer.zero_grad(set_to_none=True)
+        raise KeyboardInterrupt
+    return run
+
+
+@pytest.mark.parametrize("n_batches", [1, 3], ids=["first_batch", "several_batches"])
+def test_fit_after_interrupt_rolls_back(tmp_path, monkeypatch, n_batches):
+    """中断（部分更新）后同实例 fit：自动回滚到完整 last，结果与连续训练一致。"""
+    ta, la = _r04_env(tmp_path, "interrupted", seed=31 + n_batches)
+    ta.fit(1)
+    orig_epoch = ta.train_one_epoch
+    monkeypatch.setattr(ta, "train_one_epoch", _partial_update_then_ki(ta, n_batches))
+    ta.fit(1)  # 中断：保存 partial，标记部分更新
+    monkeypatch.setattr(ta, "train_one_epoch", orig_epoch)
+
+    ta.fit(1)  # 自动回滚 + 完成第 2 轮
+    assert ta.start_epoch == 3
+
+    tb, lb = _r04_env(tmp_path, "continuous", seed=31 + n_batches)
+    tb.fit(2)
+
+    # SpyLoader 也记录了中断轮的少量批次：比较“首个完整轮 + 回滚后重做轮”两段
+    assert la.batches[:4] == lb.batches[:4], "第一轮逐批输入不一致"
+    assert la.batches[-4:] == lb.batches[4:], "回滚重做轮的逐批输入与连续训练不一致"
+    for key in ("train_loss", "val_acc", "lr"):
+        assert ta.history[key] == pytest.approx(tb.history[key], rel=1e-5), key
+    for pa, pb in zip(ta.model.parameters(), tb.model.parameters(), strict=True):
+        assert torch.allclose(pa, pb, atol=1e-6, rtol=1e-5)
+
+    meta = read_run_meta(ta.run_dir)
+    assert len(meta.get("rollback_events", [])) == 1
+
+
+def test_fit_after_interrupt_before_validation(tmp_path, monkeypatch):
+    """训练完成但验证前中断：回滚后重做该轮，与连续训练一致。"""
+    ta, la = _r04_env(tmp_path, "intv", seed=37)
+    ta.fit(1)
+
+    def boom_eval(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ta, "evaluate", boom_eval)
+    ta.fit(1)  # epoch2 更新完成、验证前中断
+    monkeypatch.undo()
+
+    ta.fit(1)
+    assert ta.start_epoch == 3
+
+    tb, lb = _r04_env(tmp_path, "contv", seed=37)
+    tb.fit(2)
+    assert la.batches[:4] == lb.batches[:4]
+    assert la.batches[-4:] == lb.batches[4:]
+    for key in ("train_loss", "val_acc", "lr"):
+        assert ta.history[key] == pytest.approx(tb.history[key], rel=1e-5), key
+
+
+def test_fit_without_last_after_interrupt_is_rejected(tmp_path, monkeypatch):
+    """无完整 last 时中断：再次 fit 必须明确拒绝（要求重新构造）。"""
+    t, _ = _r04_env(tmp_path, "nolast", seed=39)
+    monkeypatch.setattr(t, "train_one_epoch", _partial_update_then_ki(t, 1))
+    t.fit(1)  # 立即中断：从未保存 last
+    assert not (t.checkpoints_dir / "last.pth").exists()
+    with pytest.raises(RuntimeError, match="重新构造"):
+        t.fit(1)

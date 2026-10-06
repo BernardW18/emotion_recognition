@@ -55,3 +55,6 @@ data/archive/
 
 # 实验分析中间产物
 analysis_saved/
+
+# 像素缓存（PB02：可从 data/fer2013.csv 重建的派生物，不入版本控制）
+data/cache/

@@ -3,11 +3,12 @@
 从 training/trainer.py 拆分而来，实现数据层与训练层分离。
 
 职责:
-  - FER2013Dataset: 从 CSV 按需加载图像并支持 transform
-  - build_train_transform: 根据配置组合数据增强管道
-  - create_dataloaders: 读取 CSV → 划分 → 构建 DataLoader
+  - FER2013Dataset: 从像素缓存 / DataFrame 按需加载图像并支持 transform
+  - build_train_transform: 根据配置组合逐样本增强管道（legacy 实现）
+  - create_dataloaders: 像素缓存（PB02）→ 划分 → 构建 DataLoader
   - compute_class_counts: 按固定索引统计类别样本数（采样器与损失共用）
   - compute_split_fingerprint: CSV + 各划分指纹（供 run 元数据追溯）
+  - compute_split_fingerprint_cached: 同公式，从像素缓存元数据计算（不触碰像素文件）
   - compute_class_weights: 计算逆频率类别权重（已弃用工具）
 
 用法:
@@ -26,6 +27,12 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
+from data.pixel_cache import (
+    file_sha256_cached,
+    get_memmap_split,
+    load_or_build,
+)
+
 # ============================================================
 # 项目根目录（动态计算）
 # ============================================================
@@ -38,6 +45,7 @@ __all__ = [
     "build_class_aug_transform",
     "compute_class_counts",
     "compute_split_fingerprint",
+    "compute_split_fingerprint_cached",
     "create_dataloaders",
     "compute_class_weights",
     "PROJECT_ROOT",
@@ -49,36 +57,67 @@ __all__ = [
 # ============================================================
 class FER2013Dataset(Dataset):
     """
-    FER2013 数据集类（CPU 路径，多进程安全）
-    支持配置文件中所有增强选项，包括 RandomErasing 和类别特定增强。
+    FER2013 数据集类（多进程安全）
 
-    性能优化：
-    - 首次构建时将 CSV 中像素字符串批量解析为 float32 numpy 数组
-    - 仅保留 labels 数组，不持有 DataFrame 引用
-    - 多进程安全：worker 只需 pickle 轻量 numpy 数组，不会拷贝巨型 DataFrame
-    - pin_memory 实现异步 CPU→GPU 传输
+    三种像素来源（三选一）：
+    - cache_ref=(cache_dir, split, entry)：PB02 像素缓存路径。dataset 仅持轻量元数据，
+      像素经进程内只读 mmap 惰性获取；spawn 时 pickle 不携带像素数据本体。
+    - pixels=(N,48,48) 数组 + labels：直接提供（uint8 按 x/255 归一化；float32 视为
+      已归一化）。用于测试与对照。
+    - dataframe：旧路径（构建时逐行解析为 float32/255）。保留用于对照与兼容测试。
+
+    增强：legacy 实现经 transform（逐样本 torchvision 管道）与 class_aug_map；
+    batched 实现（PB01）时两者为 None/空 dict，批级增强由 Trainer 训练循环执行。
     """
 
-    def __init__(self, dataframe, transform=None, class_aug_map: dict | None = None):
+    def __init__(self, dataframe=None, transform=None, class_aug_map: dict | None = None, *,
+                 pixels=None, labels=None, cache_ref=None):
         """
         Args:
-            dataframe: pandas DataFrame，含 emotion 和 pixels 列
-            transform: 基础数据增强管道
+            dataframe: 旧路径的 pandas DataFrame（含 emotion 和 pixels 列）
+            transform: 逐样本增强管道（legacy 实现）
             class_aug_map: 类别特定增强映射 {class_index: (transform, probability)}
                 例如 {1: (extra_transforms, 0.8)} 表示 Disgust 类有 80% 概率应用额外变换
+            pixels: (N,48,48) 像素数组（需与 labels 配对）
+            labels: (N,) 标签数组
+            cache_ref: (cache_dir, split, entry) 像素缓存引用（PB02 路径）
         """
         self.transform = transform
         self.class_aug_map = class_aug_map or {}
         # 训练元数据（由 create_dataloaders 填充；默认 None）
         self.class_counts: list | None = None
         self.split_fingerprint: dict | None = None
-        # 预计算：一次性解析所有像素字符串为 float32 数组，后续取值 O(1)
-        self._pixels = self._precompute_pixels(dataframe)
-        # 仅提取 labels，不持有 DataFrame 引用（避免多进程 pickle 巨型对象）
-        self._labels = dataframe["emotion"].values
+
+        sources = sum(s is not None for s in (dataframe, pixels, cache_ref))
+        if sources != 1:
+            raise ValueError(
+                "FER2013Dataset 需要恰好一种像素来源：dataframe / pixels / cache_ref"
+            )
+
+        if cache_ref is not None:
+            cache_dir, split, entry = cache_ref
+            # 仅保留轻量引用（字符串 + 小 dict）：多进程 spawn 不复制像素数据
+            self._cache_ref: tuple | None = (str(cache_dir), str(split), dict(entry))
+            self._pixels = None
+            self._labels = None
+            self._n = int(entry["n"])
+        elif pixels is not None:
+            if labels is None:
+                raise ValueError("pixels 模式需要同时提供 labels")
+            self._cache_ref = None
+            self._pixels = pixels
+            self._labels = labels
+            self._n = len(pixels)
+        else:
+            # 旧路径：一次性解析所有像素字符串为 float32/255，仅保留 numpy（不持有 DataFrame）
+            self._cache_ref = None
+            self._pixels = self._precompute_pixels(dataframe)
+            # 仅提取 labels，不持有 DataFrame 引用（避免多进程 pickle 巨型对象）
+            self._labels = dataframe["emotion"].values
+            self._n = len(self._labels)
 
     def _precompute_pixels(self, dataframe):
-        """批量解析像素字符串为 (N, 48, 48) float32 数组"""
+        """批量解析像素字符串为 (N, 48, 48) float32 数组（已除 255；对照/兼容路径）"""
         n = len(dataframe)
         pixels_all = np.empty((n, 48, 48), dtype=np.float32)
         pixel_data = dataframe["pixels"].values
@@ -90,19 +129,31 @@ class FER2013Dataset(Dataset):
         return pixels_all
 
     def __len__(self):
-        return len(self._labels)
+        return self._n
 
     def __getitem__(self, idx):
-        image = self._pixels[idx]
+        if self._cache_ref is not None:
+            # 缓存路径：只读 mmap 取单张（uint8 slice → float32 /255）
+            x_mm, y_mm, _rows = get_memmap_split(self._cache_ref)
+            image = np.asarray(x_mm[idx], dtype=np.float32)
+            image /= 255.0
+            label = int(y_mm[idx])
+        elif self._pixels is not None and getattr(self._pixels, "dtype", None) == np.uint8:
+            image = np.asarray(self._pixels[idx], dtype=np.float32)
+            image /= 255.0
+            label = int(self._labels[idx])
+        else:
+            image = np.asarray(self._pixels[idx], dtype=np.float32)
+            label = self._labels[idx]
+
         image = np.expand_dims(image, axis=0)  # (1, 48, 48)
-        label = self._labels[idx]
 
         if self.transform:
             image = self.transform(torch.FloatTensor(image))
         else:
             image = torch.FloatTensor(image)
 
-        # 类别特定增强：对指定类别应用额外变换
+        # 类别特定增强：对指定类别应用额外变换（legacy 实现）
         if label in self.class_aug_map:
             extra_transform, prob = self.class_aug_map[label]
             if torch.rand(1).item() < prob:
@@ -206,42 +257,34 @@ def build_class_aug_transform(aug_config: dict, *, master_enabled: bool = True) 
 # ============================================================
 # DataLoader 工厂
 # ============================================================
-def create_dataloaders(config: dict, model_name: str | None = None):
+def create_dataloaders(config: dict, model_name: str | None = None, *,
+                       include_test: bool = True):
     """
     创建训练/验证/测试 DataLoader
 
-    注意：类别平衡由训练器中的 Focal Loss 处理，无需显式计算 class_weights。
+    - 像素来源为 data/pixel_cache 的 uint8 只读缓存（PB02）：加载时核验 CSV SHA-256，
+      缓存缺失/失配/损坏时明确重建；PrivateTest 仅在 include_test=True 时构建
+    - 增强实现由 augmentation.impl 选择：'legacy' 使用逐样本 torchvision 管道
+      （dataset.transform / class_aug_map）；'batched' 时 dataset 不带增强，
+      批级张量增强由 Trainer 训练循环执行（PB01）
+    - 类别平衡由训练器中的 Focal Loss 处理，无需显式计算 class_weights
 
     Args:
         config: 完整训练配置
         model_name: 模型名称，用于读取模型特定的 batch_size
+        include_test: 是否构建 PrivateTest loader（训练入口可传 False 按需构建）
 
     Returns:
-        train_loader, val_loader, test_loader, class_names
+        train_loader, val_loader, test_loader（include_test=False 时为 None）, class_names
     """
     class_names = config["data"]["class_names"]
     use_cuda = torch.cuda.is_available()
 
-    # 加载数据
+    # ---- 数据来源：像素缓存（PB02）uint8 mmap + CSV SHA 校验（失配/损坏→重建）----
     dataset_path = PROJECT_ROOT / config["data"]["dataset_path"]
-    df = pd.read_csv(dataset_path)
-
-    # 按官方 Usage 划分（官方协议）；缺失 Usage 时明确报错，不做静默回退
-    if "Usage" not in df.columns:
-        raise ValueError(
-            "数据集缺少 Usage 列：本项目使用官方 Training/PublicTest/PrivateTest 划分；"
-            "自定义划分清单尚未支持，请提供含 Usage 的 FER2013 CSV"
-        )
-    train_df = df[df["Usage"] == "Training"].reset_index(drop=True)
-    val_df = df[df["Usage"] == "PublicTest"].reset_index(drop=True)
-    test_df = df[df["Usage"] == "PrivateTest"].reset_index(drop=True)
-    if min(len(train_df), len(val_df), len(test_df)) == 0:
-        raise ValueError(
-            f"Usage 划分不完整: Training={len(train_df)}, "
-            f"PublicTest={len(val_df)}, PrivateTest={len(test_df)}"
-        )
-    if len(train_df) + len(val_df) + len(test_df) != len(df):
-        raise ValueError("存在未归入官方划分的行（Usage 取值异常），请检查数据文件")
+    pixel_cache = load_or_build(dataset_path)
+    _x_tr, y_tr, _rows_tr = pixel_cache.split_arrays("Training")   # 触发文件校验/打开
+    _x_va, y_va, _rows_va = pixel_cache.split_arrays("PublicTest")
 
     # 获取 batch_size
     if model_name and model_name in config.get("models", {}):
@@ -251,24 +294,40 @@ def create_dataloaders(config: dict, model_name: str | None = None):
     else:
         batch_size = config["training"]["batch_size"]
 
-    # 数据增强
-    train_transform = build_train_transform(config["augmentation"])
+    # ---- 增强实现（PB01）：augmentation.impl ∈ {legacy, batched} ----
+    aug_config = config.get("augmentation", {})
+    aug_impl = aug_config.get("impl", "legacy")
+    if aug_impl not in ("legacy", "batched"):
+        raise ValueError(
+            f"augmentation.impl 不支持: {aug_impl!r}（应为 'legacy' / 'batched'）"
+        )
+    train_transform = None
+    class_aug_map: dict = {}
+    if aug_impl == "legacy":
+        # 逐样本增强管道（旧实现，保留用于对照）
+        train_transform = build_train_transform(aug_config)
+        # 类别特定增强（如 Disgust 类额外增强）；总开关关闭时整体停用
+        class_aug_map = build_class_aug_transform(
+            aug_config.get("class_specific", {}),
+            master_enabled=aug_config.get("enabled", False),
+        )
+    else:
+        print("  增强实现: batched（批级张量增强，由 Trainer 训练循环执行）")
 
-    # 类别特定增强（如 Disgust 类额外增强）；总开关关闭时整体停用
-    class_aug_map = build_class_aug_transform(
-        config.get("augmentation", {}).get("class_specific", {}),
-        master_enabled=config.get("augmentation", {}).get("enabled", False),
-    )
-
-    # 统一使用 CPU 路径：多进程 worker 并行增强 + pin_memory 异步传输
+    # ---- 数据集（仅持轻量缓存引用；spawn 时 pickle 不携带像素数据本体）----
     train_dataset = FER2013Dataset(
-        train_df, transform=train_transform, class_aug_map=class_aug_map)
-    val_dataset = FER2013Dataset(val_df)
-    test_dataset = FER2013Dataset(test_df)
+        transform=train_transform, class_aug_map=class_aug_map,
+        cache_ref=(pixel_cache.cache_dir, "Training",
+                   pixel_cache.meta["splits"]["Training"]),
+    )
+    val_dataset = FER2013Dataset(
+        cache_ref=(pixel_cache.cache_dir, "PublicTest",
+                   pixel_cache.meta["splits"]["PublicTest"]),
+    )
 
     # 训练集类别计数（固定 0..num_classes-1 索引）：采样器与 CB Focal Loss 共用同一份统计
     num_classes = config["data"]["num_classes"]
-    train_class_counts = compute_class_counts(train_df["emotion"].values, num_classes)
+    train_class_counts = compute_class_counts(y_tr, num_classes)
     train_dataset.class_counts = train_class_counts
     print(
         f"训练集类别计数 (索引 0-{num_classes - 1}): "
@@ -276,7 +335,7 @@ def create_dataloaders(config: dict, model_name: str | None = None):
     )
 
     # 数据指纹（CSV SHA-256 + 各划分行号/标签哈希）：随 run_meta 记录，可复核追溯
-    train_dataset.split_fingerprint = compute_split_fingerprint(dataset_path, df)
+    train_dataset.split_fingerprint = compute_split_fingerprint_cached(dataset_path, pixel_cache)
 
     # DataLoader 配置
     dl_config = config.get("dataloader", {})
@@ -292,7 +351,7 @@ def create_dataloaders(config: dict, model_name: str | None = None):
             print("  num_workers=0：persistent_workers 自动关闭（DataLoader 不允许）")
         persistent_workers = False
 
-    # 训练 DataLoader：多进程并行增强 + 大 prefetch 缓冲吸收变换抖动
+    # 训练 DataLoader：多进程取数 + 大 prefetch 缓冲吸收变换抖动
     # 更大的 prefetch_factor 让 DataLoader 预取更多批次到队列，
     # 当某批变换耗时高时主线程可以直接消费缓存，避免等待
     train_loader_kwargs = {
@@ -314,26 +373,48 @@ def create_dataloaders(config: dict, model_name: str | None = None):
     nw_info = f"train_workers={train_workers}(prefetch={prefetch_factor}), eval_workers=0"
     print(f"DataLoader: batch_size={batch_size}, {nw_info}, pin_memory={pin_memory}")
 
+    # ---- 精确恢复（S01）：训练 sampler / DataLoader 使用独立 generator ----
+    # 批次索引序列（sampler 抽取）与 worker 基础种子（DataLoader base_seed）
+    # 由这两个 generator 驱动；其状态随 checkpoint 保存/恢复，使 workers=0 与
+    # non-persistent 多 worker 的“连续 vs 恢复”逐批一致成为可复算行为。
+    # persistent_workers=True 不提供精确恢复能力（worker 内部 RNG 进度跨会话不可见）。
+    train_seed = config["seed"]
+    g_sampler = torch.Generator().manual_seed(train_seed)
+    g_loader = torch.Generator().manual_seed(train_seed + 12345)
+
     # Class-balanced sampling：用 WeightedRandomSampler 过采样少样本类
     # 与 Focal Loss 互补：sampler 负责数据分布，Focal Loss 负责梯度权重
     class_balanced = dl_config.get("class_balanced_sampling", False)
     train_sampler = None
     if class_balanced:
         weights = _compute_sampler_weights(
-            train_df, num_classes=num_classes, class_counts=train_class_counts
+            y_tr, num_classes=num_classes, class_counts=train_class_counts
         )
         train_sampler = torch.utils.data.WeightedRandomSampler(
-            weights, num_samples=len(weights), replacement=True,
+            weights, num_samples=len(weights), replacement=True, generator=g_sampler,
         )
         print(f"  class_balanced_sampling: enabled (min_weight={min(weights):.4f}, "
               f"max_weight={max(weights):.4f}, ratio={max(weights)/min(weights):.1f}x)")
 
+    if train_workers > 0 and persistent_workers:
+        print(
+            "  ⚠️  persistent_workers=True：该配置不提供精确恢复能力"
+            "（中断后续训无法逐批一致；如需精确恢复请关闭 persistent_workers）"
+        )
+
     train_loader = DataLoader(
         train_dataset, shuffle=(train_sampler is None),
-        sampler=train_sampler, **train_loader_kwargs,
+        sampler=train_sampler, generator=g_loader, **train_loader_kwargs,
     )
     val_loader = DataLoader(val_dataset, shuffle=False, **eval_loader_kwargs)
-    test_loader = DataLoader(test_dataset, shuffle=False, **eval_loader_kwargs)
+
+    test_loader = None
+    if include_test:
+        test_dataset = FER2013Dataset(
+            cache_ref=(pixel_cache.cache_dir, "PrivateTest",
+                       pixel_cache.meta["splits"]["PrivateTest"]),
+        )
+        test_loader = DataLoader(test_dataset, shuffle=False, **eval_loader_kwargs)
 
     return train_loader, val_loader, test_loader, class_names
 
@@ -371,6 +452,35 @@ def compute_split_fingerprint(csv_path, df: pd.DataFrame) -> dict:
     return fingerprint
 
 
+def compute_split_fingerprint_cached(csv_path, pixel_cache) -> dict:
+    """
+    数据指纹（像素缓存版）：CSV 文件 SHA-256 + 官方各划分的（行号‖标签）哈希。
+
+    与 compute_split_fingerprint 公式完全一致（sha256(行号 int64-LE ‖ 标签 int64-LE)；
+    行号 = CSV 数据行顺序，从 0 计），但直接读取缓存中的 labels/行号文件：
+    不触碰 26 MiB 级像素文件、不打断 PrivateTest 的按需构建语义。
+    """
+    fingerprint: dict[str, Any] = {
+        "protocol": "official-usage",
+        "csv_path": str(csv_path),
+        "csv_sha256": file_sha256_cached(csv_path),
+        "splits": {},
+    }
+    for split in ("Training", "PublicTest", "PrivateTest"):
+        entry = pixel_cache.meta["splits"][split]
+        rows = np.load(pixel_cache.cache_dir / entry["rows"]["file"])
+        labels = np.load(pixel_cache.cache_dir / entry["y"]["file"])
+        sh = hashlib.sha256(
+            np.asarray(rows, dtype=np.int64).tobytes()
+            + np.asarray(labels, dtype=np.int64).tobytes()
+        ).hexdigest()
+        fingerprint["splits"][split] = {
+            "rows": int(len(labels)),
+            "row_label_hash_sha256": sh,
+        }
+    return fingerprint
+
+
 def compute_class_counts(labels, num_classes: int) -> list:
     """
     按 0..num_classes-1 的固定索引统计各类别样本数。
@@ -393,7 +503,7 @@ def compute_class_counts(labels, num_classes: int) -> list:
     return [int((labels == i).sum()) for i in range(num_classes)]
 
 
-def _compute_sampler_weights(train_df: pd.DataFrame, *, num_classes: int,
+def _compute_sampler_weights(labels, *, num_classes: int,
                              class_counts: list) -> list:
     """
     为 WeightedRandomSampler 计算每个样本的采样权重（逆频率加权）。
@@ -403,12 +513,12 @@ def _compute_sampler_weights(train_df: pd.DataFrame, *, num_classes: int,
     零计数类别明确报错（不压缩类别索引、不静默跳过）。
 
     Args:
-        train_df: 训练集 DataFrame（含 'emotion' 列）
+        labels: 训练集标签数组（顺序与数据集一致）
         num_classes: 类别总数（固定索引 0..num_classes-1）
         class_counts: compute_class_counts 的统计结果
 
     Returns:
-        每个样本的权重列表，顺序与 train_df 一致
+        每个样本的权重列表，顺序与 labels 一致
     """
     zero_classes = [i for i, c in enumerate(class_counts) if c <= 0]
     if zero_classes:
@@ -416,7 +526,7 @@ def _compute_sampler_weights(train_df: pd.DataFrame, *, num_classes: int,
             f"训练集类别索引 {zero_classes} 样本数为 0，无法计算逆频率采样权重；"
             "请检查数据划分或关闭 class_balanced_sampling"
         )
-    labels = train_df["emotion"].values
+    labels = np.asarray(labels)
     counts = np.asarray(class_counts, dtype=np.float64)
     class_weights = counts.sum() / (num_classes * counts)
     # 每个样本的权重 = 其类别的逆频率权重

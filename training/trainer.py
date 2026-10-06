@@ -18,6 +18,7 @@
 用法:
     from training.trainer import Trainer
     trainer = Trainer(model, train_loader, val_loader, test_loader, config, model_name)
+    # test_loader 允许为 None（PB02：PrivateTest 由统一评估入口按需构建）
     trainer.fit(30)
 """
 
@@ -26,7 +27,6 @@ __all__ = [
     "build_optimizer", "build_scheduler",
     "mixup_data", "mixup_criterion",
     "compute_batch_sizes", "compute_group_totals", "update_val_loss_monitor",
-    "enforce_exact_resume_conditions",
     "Trainer",
 ]
 
@@ -47,14 +47,23 @@ import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from data.batch_augment import (
+    BATCH_AUG_SEED_RULE,
+    BATCH_AUG_VERSION,
+    BatchAugmenter,
+    build_batch_augmenter,
+)
 from training.checkpoint import (
     RUNS_ROOT,
+    TRAINING_PROTOCOL_VERSION,
     _capture_rng_state,
     _format_duration,
     _restore_rng_state,
+    _restore_training_state,
     collect_environment_info,
     collect_git_info,
     read_run_meta,
+    scheduler_effective_dict,
     write_json_atomic,
     write_run_meta,
 )
@@ -133,12 +142,25 @@ def set_seed(seed: int = 42, deterministic: bool = False):
 # 优化器工厂
 # ============================================================
 def build_optimizer(model: nn.Module, config: dict) -> optim.Optimizer:
-    """根据配置构建优化器（config 为 training section 或合并后的配置）"""
+    """根据配置构建优化器（config 为 training section 或合并后的配置）。
+
+    PB03：optimizer_fused（默认 False，仅 Adam）启用 fused 实现；要求 CUDA 参数，
+    否则明确报错（不静默回退——协议记录的是实际生效配置）。
+    """
     lr = config["learning_rate"]
     wd = config["weight_decay"]
     name = config.get("optimizer", "adam").lower()
 
     if name == "adam":
+        fused = bool(config.get("optimizer_fused", False))
+        if fused:
+            param_device = next(model.parameters()).device
+            if param_device.type != "cuda":
+                raise ValueError(
+                    "training.optimizer_fused=True 仅支持 CUDA 参数"
+                    f"（当前设备: {param_device.type}）；请关闭该选项或改用 CUDA 训练"
+                )
+            return optim.Adam(model.parameters(), lr=lr, weight_decay=wd, fused=True)
         return optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
     elif name == "adamw":
         return optim.AdamW(model.parameters(), lr=lr, weight_decay=wd)
@@ -272,31 +294,25 @@ def update_val_loss_monitor(
     return hist_min_val_loss, loss_worse_counter
 
 
-def enforce_exact_resume_conditions(config: dict) -> dict:
-    """
-    精确恢复支持范围（R01）：恢复训练前将数据加载调整为可验证一致的模式——
-    num_workers=0（单进程数据管线；批次顺序与增强随机性由可保存/恢复的 RNG 驱动）。
+# 训练协议快照中允许变化、不参与比对的白名单字段（S02）：
+# 仅限不影响训练状态的显示/输出/内存选项；轮数以 fit 参数给出（追加轮数自然合法）。
+_PROTOCOL_WHITELIST_PATHS = (
+    ("checkpoint", "save_every_n_epochs"),
+    ("checkpoint", "max_checkpoint_files"),
+    ("dataloader", "pin_memory"),
+    ("dataloader", "prefetch_factor"),
+)
 
-    多进程 / 持久 worker 下的"恢复 == 连续"未获实测支持；在恢复前调用本函数
-    做调整并记录，是对"精确恢复"的显式前提。
-    返回调整记录（应写入 run_meta 的恢复事件）。
-    """
-    dl = config.setdefault("dataloader", {})
-    original = int(dl.get("num_workers", 0))
-    info = {
-        "exact_resume_supported_scope": "num_workers=0",
-        "original_num_workers": original,
-        "enforced_num_workers": 0,
-        "adjusted": original > 0,
-    }
-    if original > 0:
-        dl["num_workers"] = 0
-        dl["persistent_workers"] = False
-        print(
-            f"  [精确恢复] 数据加载 num_workers 由 {original} 调整为 0"
-            "（精确恢复仅在单进程数据管线下实测支持；调整记录于 run_meta）"
-        )
-    return info
+
+def _delete_config_path(config: dict, path: tuple) -> None:
+    """从配置快照中删除白名单字段（缺失时静默）。"""
+    node: object = config
+    for key in path[:-1]:
+        if not isinstance(node, dict):
+            return
+        node = node.get(key, {})
+    if isinstance(node, dict):
+        node.pop(path[-1], None)
 
 
 # ============================================================
@@ -318,7 +334,7 @@ class Trainer:
         model: nn.Module,
         train_loader: DataLoader,
         val_loader: DataLoader,
-        test_loader: DataLoader,
+        test_loader: DataLoader | None,
         config: dict,
         model_name: str,
         device: torch.device | None = None,
@@ -390,6 +406,25 @@ class Trainer:
             and bool(config.get("augmentation", {}).get("class_specific", {}).get("enabled", False))
         )
 
+        # ---- 增强实现（PB01）：augmentation.impl ∈ {legacy, batched} ----
+        # legacy：逐样本 torchvision 管道（dataset.transform，由 create_dataloaders 绑定）
+        # batched：批级张量增强，在 train_one_epoch 内于 .to(device) 之前执行
+        aug_cfg = config.get("augmentation", {})
+        self._aug_impl = aug_cfg.get("impl", "legacy")
+        if self._aug_impl not in ("legacy", "batched"):
+            raise ValueError(
+                f"augmentation.impl 不支持: {self._aug_impl!r}（应为 'legacy' / 'batched'）"
+            )
+        self.batch_augmenter: BatchAugmenter | None = None
+        if self._aug_impl == "batched":
+            self.batch_augmenter = build_batch_augmenter(aug_cfg, seed=config["seed"])
+            ds_transform = getattr(train_loader.dataset, "transform", None)
+            if ds_transform is not None:
+                raise ValueError(
+                    "augmentation.impl=batched 但 train_loader.dataset 仍带逐样本 transform"
+                    "（会双重增强）；请经 create_dataloaders 构建训练集"
+                )
+
         # ---- 类别计数（F06）：采样器与 CB Focal Loss 必须同源 ----
         ds_counts = getattr(train_loader.dataset, "class_counts", None)
         if (
@@ -449,6 +484,8 @@ class Trainer:
             "learning_rate", config["training"]["learning_rate"]
         )
         self.optimizer = build_optimizer(self.model, merged_training)
+        # PB03：实际生效的 fused 状态（fused=true 时 build_optimizer 已校验 CUDA 并生效）
+        self._optimizer_fused = bool(merged_training.get("optimizer_fused", False))
         self.scheduler = build_scheduler(
             self.optimizer, config["training"], self.scheduler_num_epochs,
             model_config=self.model_config,
@@ -486,6 +523,9 @@ class Trainer:
             "val_acc": [], "val_top5_acc": [], "lr": [],
         }
         self.best_model_state = None  # 内存快照仅在 fit 会话内有效；权威 best 在 best.pth
+        # S03：True 表示上一会话以“部分轮更新”结束（中断/异常）；
+        # 此时直接 fit 会先自动回滚到最近完整 last.pth（rollback_events 记录）
+        self._partial_state = False
 
         # ---- 参数量 ----
         self.total_params, self.trainable_params = count_parameters(
@@ -544,6 +584,13 @@ class Trainer:
             "torch_compile": self.use_compile,
             "effective_augmentation": {
                 "master": self.augmentation_master,
+                "impl": self._aug_impl,
+                "batch_augmenter_version": (
+                    BATCH_AUG_VERSION if self.batch_augmenter is not None else None
+                ),
+                "batch_augmenter_seed_rule": (
+                    BATCH_AUG_SEED_RULE if self.batch_augmenter is not None else None
+                ),
                 "mixup": self.mixup_enabled,
                 "class_specific": self.class_specific_enabled,
             },
@@ -561,41 +608,67 @@ class Trainer:
 
     def get_training_protocol(self) -> dict:
         """
-        训练协议快照（R02）：恢复前逐项比对，防止"换了配置/数据仍续写原 run"。
-        全部取运行时有效值（而非配置原始文本）。
+        训练协议快照 v2（S01/S02）：**完整生效配置**的规范化副本（仅剔除白名单
+        字段）+ 运行时有效值（数据管线规格、AMP/compile 实际状态、调度器实际参数、
+        双早停参数等）+ 数据指纹。恢复前整字典比对，任何影响训练状态的差异都会被
+        拒绝（避免手工挑字段遗漏）。
+
+        字段覆盖：全部启用的增强数值/概率/目标类别、裁剪、累积、双早停参数、
+        scheduler（T0/T_mult/step_size/gamma 的声明与实际）、sampler/loader 规格、
+        损失、优化器、monitor、精度与数据指纹。
         """
-        dataset = getattr(self.train_loader, "dataset", None)
-        return {
-            "loss": {
-                "type": self.loss_type,
-                "focal_gamma": self.focal_gamma,
-                "cb_focal_beta": self.cb_focal_beta,
+        import copy as _copy
+
+        snapshot = _copy.deepcopy(self.config)
+        for path in _PROTOCOL_WHITELIST_PATHS:
+            _delete_config_path(snapshot, path)
+
+        loader = self.train_loader
+        sampler = getattr(loader, "sampler", None)
+        has_generators = (
+            isinstance(getattr(loader, "generator", None), torch.Generator)
+            and (sampler is None or isinstance(getattr(sampler, "generator", None),
+                                               torch.Generator))
+        )
+        runtime = {
+            "loader": {
+                "num_workers": int(getattr(loader, "num_workers", 0) or 0),
+                "persistent_workers": bool(getattr(loader, "persistent_workers", False)),
+                "sampler": type(sampler).__name__ if sampler is not None else None,
+                "batch_size": loader.batch_size,
+                "has_generators": has_generators,
             },
-            "class_balanced_sampling": self.class_balanced_sampling,
-            "augmentation": {
-                "master": self.augmentation_master,
-                "mixup": self.mixup_enabled,
-                "mixup_alpha": self.mixup_alpha,
-                "class_specific": self.class_specific_enabled,
-            },
-            "train_batch_size": self.train_loader.batch_size,
-            "gradient_accumulation_steps": self.grad_accum_steps,
-            # 基准学习率取配置值（不随调度器变化；避免恢复时误报差异）
-            "optimizer": {
-                "name": self.config["training"].get("optimizer", "adam"),
-                "lr": float(self.model_config.get(
-                    "learning_rate", self.config["training"]["learning_rate"]
-                )),
-                "weight_decay": float(self.config["training"].get("weight_decay", 0.0)),
-            },
-            "scheduler": {
-                "name": self.config["training"].get("scheduler", "none"),
-                "num_epochs": self.scheduler_num_epochs,
-            },
+            "amp_effective": bool(self.use_amp),
+            "torch_compile_effective": bool(self.use_compile),
+            "loss_effective": self.loss_type,
+            "focal_gamma": float(self.focal_gamma),
+            "cb_focal_beta_effective": self.cb_focal_beta,
+            "scheduler_effective": scheduler_effective_dict(self.scheduler),
+            "max_grad_norm": float(self.max_grad_norm),
+            "gradient_accumulation_steps": int(self.grad_accum_steps),
+            "patience": int(self.patience),
+            "val_loss_patience": int(self.val_loss_patience),
+            "val_loss_threshold": float(self.val_loss_threshold),
             "monitor_metric": self.monitor_metric,
-            "save_best": self.save_best,
-            "amp": self.use_amp,
-            "cudnn_deterministic": self.deterministic,
+            "save_best": bool(self.save_best),
+            "cudnn_deterministic": bool(self.deterministic),
+            "batch_augmentation_effective": {
+                "impl": self._aug_impl,
+                "active": self.batch_augmenter is not None,
+                "version": (
+                    BATCH_AUG_VERSION if self.batch_augmenter is not None else None
+                ),
+                "seed_rule": (
+                    BATCH_AUG_SEED_RULE if self.batch_augmenter is not None else None
+                ),
+            },
+            "optimizer_fused_effective": bool(getattr(self, "_optimizer_fused", False)),
+        }
+        dataset = getattr(loader, "dataset", None)
+        return {
+            "protocol_version": TRAINING_PROTOCOL_VERSION,
+            "config": snapshot,
+            "runtime": runtime,
             "data_fingerprint": getattr(dataset, "split_fingerprint", None),
         }
 
@@ -628,9 +701,13 @@ class Trainer:
         return _save_checkpoint(self, path, partial=partial, history=history)
 
     def load_checkpoint(self, checkpoint_path) -> dict:
-        """从 checkpoint 恢复完整训练状态；恢复后清空梯度（不残留旧梯度）"""
+        """
+        从 checkpoint 恢复完整训练状态（校验/拒绝逻辑见 training.checkpoint）；
+        恢复后清空梯度、清除“部分轮更新”标记（状态回到已知完整边界）。
+        """
         ckpt = _load_checkpoint(self, checkpoint_path)
         self.optimizer.zero_grad(set_to_none=True)
+        self._partial_state = False
         return ckpt
 
     @staticmethod
@@ -646,6 +723,37 @@ class Trainer:
         """AMP GradScaler（use_amp=True 时必存在；helper 用于类型收窄）"""
         assert self.scaler is not None, "GradScaler 仅在 use_amp=True 时可用"
         return self.scaler
+
+    def _rollback_to_last_checkpoint(self) -> None:
+        """
+        S03：会话以“部分轮更新”结束（中断/异常）后，恢复到最近完整 last.pth
+        再允许继续训练；覆盖模型/BN、优化器、调度器、scaler、RNG、loader 生成器、
+        best/早停计数与 history。没有完整 last.pth 时明确拒绝（要求重新构造）。
+        回滚事件记录于 run_meta.rollback_events。
+        """
+        last_path = self.checkpoints_dir / "last.pth"
+        if not last_path.exists():
+            raise RuntimeError(
+                "上一会话以部分轮更新结束（键盘中断/异常），且不存在完整 last.pth：\n"
+                "无法自动回滚到完整边界。请重新构造 Trainer 从头训练，"
+                "不要沿用含部分更新的实例。"
+            )
+        checkpoint = torch.load(last_path, map_location="cpu", weights_only=False)
+        _restore_training_state(self, checkpoint)
+        self.optimizer.zero_grad(set_to_none=True)
+        self._partial_state = False
+        self.run_meta.setdefault("rollback_events", []).append({
+            "rolled_back_at": datetime.now().isoformat(),
+            "reason": "partial-update recovery（上一会话中断/异常后的自动回滚）",
+            "checkpoint": str(last_path),
+            "checkpoint_sha256": file_sha256(last_path),
+            "history_epochs": len(self.history["train_loss"]),
+        })
+        self._persist_run_meta()
+        print(
+            f"检测到部分轮更新：已自动回滚至最近完整断点"
+            f"（epoch {self.start_epoch - 1}）并记录 rollback_events"
+        )
 
     # ========================================================
     # 性能诊断
@@ -876,8 +984,15 @@ class Trainer:
         group_totals = compute_group_totals(sizes, self.grad_accum_steps)
         self.optimizer.zero_grad(set_to_none=True)
 
-        pbar = tqdm(self.train_loader, desc=f"[Epoch {self._current_epoch}]", leave=False)
+        epoch_idx = getattr(self, "_current_epoch", 0)
+        pbar = tqdm(self.train_loader, desc=f"[Epoch {epoch_idx}]", leave=False)
         for batch_idx, (images, labels) in enumerate(pbar):
+            # PB01：批级张量增强（CPU、.to(device) 之前；批种子 = f(seed, epoch, batch_idx)，
+            # 连续与恢复训练在第 e 轮第 i 批复算出同一批增强参数）
+            if self.batch_augmenter is not None:
+                images = self.batch_augmenter(
+                    images, labels, epoch=epoch_idx, batch_idx=batch_idx
+                )
             if images.device != self.device:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
@@ -1018,6 +1133,10 @@ class Trainer:
                 print(f"   累计用时: {_format_duration(self._accumulated_train_time)}")
             print(f"{'=' * 60}")
             return self.history
+
+        # S03：若上一会话以部分轮更新结束（中断/异常），先回滚到最近完整断点
+        if self._partial_state:
+            self._rollback_to_last_checkpoint()
 
         total_epochs = self.start_epoch + additional_epochs - 1
 
@@ -1188,11 +1307,15 @@ class Trainer:
                 self.checkpoints_dir / f"interrupted_epoch{interrupted_epoch:03d}_{ts}.pth"
             )
             self.save_checkpoint(interrupt_path, partial=True)
+            self._partial_state = True  # S03：禁止未经回滚的直接继续
             print(f"断点已保存至: {interrupt_path}（partial：权重含未完成 epoch 的部分更新）")
-            print("   可通过 --resume auto 从最近完整 epoch 继续")
+            print("   可通过 --resume auto 从最近完整 epoch 继续；"
+                  "同一实例再次 fit 将先自动回滚到最近完整断点（rollback_events 记录）")
         except Exception as e:
             # 失败会话的耗时同样计入累计（时间实际已消耗；状态由 run_meta 标记 failed）
             self._accumulated_train_time += time.time() - fit_start
+            # S03：异常退出可能留下部分轮更新；禁止未经回滚的直接继续
+            self._partial_state = True
             self._persist_run_meta(status="failed", error=repr(e))
             raise
 

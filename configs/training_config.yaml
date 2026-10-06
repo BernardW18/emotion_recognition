@@ -23,6 +23,9 @@ dataloader:
 # 数据增强
 augmentation:
   enabled: true
+  # 增强实现（PB01）：legacy = 逐样本 torchvision 管道；batched = 批级张量增强（训练循环内，更快）
+  # 两者参数/概率/顺序/类别条件一致（同分布），随机序列不同；切换会改变训练轨迹，需重新训练
+  impl: "batched"
   random_horizontal_flip: 0.5
   random_rotation: 10
   random_affine_translate: 0.1    # 微小平移（图像尺寸的比例）
@@ -51,7 +54,8 @@ training:
   num_epochs: 50
   learning_rate: 0.001
   weight_decay: 1.0e-4
-  optimizer: "adam"               # adam / sgd / adamw
+  optimizer: "adam"
+  optimizer_fused: false          # PB03: fused Adam（仅 CUDA/Adam；默认关闭，验收后决定是否启用）               # adam / sgd / adamw
   activation: "relu"              # relu / leaky_relu / elu / gelu
   scheduler: "cosine_warm"         # cosine / cosine_warm / step / plateau / none
   scheduler_step_size: 10
@@ -73,24 +77,26 @@ training:
   cudnn_deterministic: false      # cuDNN 确定性模式（true=严格可复现但明显变慢；由配置决定，初始化与 fit 不再强制覆盖）
 
 # 模型特定覆盖
+# 统一训练预算（comparison-v2 §3.1：LR=3e-4 / batch=128 / epochs=90；
+# 2026-10-07 应用；冻结日期/commit 待正式重训提交前登记）→ 差异只来自架构本身
 models:
   mini_cnn:
-    learning_rate: 0.0005
-    batch_size: 256               # 1.27M 参数，独显直连可加大 batch（实测参数量）
-    num_epochs: 30
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
     dropout: 0.3
     activation: "relu"
 
   vgg_lite:
     learning_rate: 0.0003
-    batch_size: 128               # 5.41M 参数，独显直连适度加大（实测参数量）
+    batch_size: 128
     num_epochs: 90
     dropout: 0.5
     activation: "relu"
 
   micro_resnet:
     learning_rate: 0.0003
-    batch_size: 128               # 754K 参数，独显直连可加大（实测参数量）
+    batch_size: 128
     num_epochs: 90
     dropout: 0.3
     activation: "gelu"

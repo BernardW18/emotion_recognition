@@ -30,11 +30,10 @@ from inference.infer_utils import (
     CLASS_EMOJIS,
     CLASS_NAMES,
     describe_checkpoint,
-    generate_gradcam,
     list_available_checkpoints,
     load_model,
-    predict,
 )
+from inference.service import analyze, image_sha256
 
 
 @st.cache_resource
@@ -117,8 +116,9 @@ with st.sidebar:
         st.divider()
         st.subheader("🔬 可视化")
         show_gradcam = st.toggle(
-            "Grad-CAM 热力图", value=True,
-            help="目标类别的梯度响应辅助图；辅助可视化，不构成模型因果机制或心理解释的证据",
+            "Grad-CAM 热力图（按需生成）", value=False,
+            help="默认关闭：仅做类别预测。打开后按需生成目标类别的梯度响应辅助图；"
+                 "辅助可视化，不构成模型因果机制或心理解释的证据",
         )
 
     st.divider()
@@ -153,6 +153,7 @@ device = None
 result = None
 image = None
 uploaded_file = None
+raw_bytes = None
 
 with col1:
     st.subheader("📤 上传图像")
@@ -164,11 +165,13 @@ with col1:
 
     if uploaded_file is not None:
         try:
+            raw_bytes = uploaded_file.getvalue()
             uploaded_file.seek(0)
             image = Image.open(uploaded_file)
             image.load()  # 触发完整解码，捕获损坏文件
         except Exception as e:
             image = None
+            raw_bytes = None
             st.error(f"❌ 无法解码该文件（可能已损坏或不是有效图像）: {e}")
         else:
             # 控制显示宽度
@@ -179,12 +182,18 @@ with col2:
     st.subheader("🔍 识别结果")
 
     if uploaded_file is not None and image is not None:
-        # 加载模型并推理
+        # 加载模型并推理（PB04：默认仅分类 1 次前向；结果按 图像/权重 缓存，
+        # 同键重复请求不重算）
         try:
             with st.spinner("正在加载模型并识别..."):
                 mtime = Path(selected_item["path"]).stat().st_mtime
                 model, device, _meta = load_model_cached(selected_item["path"], mtime)
-                result = predict(model, image, device)
+                assert raw_bytes is not None  # 解码成功路径必为 bytes
+                image_digest = image_sha256(raw_bytes)
+                ckpt_key = f"{selected_item['path']}|{mtime}"
+                payload = analyze(model, image, image_digest, ckpt_key, device,
+                                  want_gradcam=False)
+                result = payload["result"]
 
             # 显示主要结果
             st.markdown("---")
@@ -240,39 +249,18 @@ if (
     st.subheader("🔬 Grad-CAM 热力图（辅助可视化）")
 
     try:
+        # PB04：按需生成并缓存（同键重复请求不重算、不重绘）；
+        # 使用已知的预测类别作为目标类，不做额外的目标判断前向
         with st.spinner("正在生成热力图..."):
-            heatmap = generate_gradcam(model, image, device)
+            payload_gc = analyze(
+                model, image, image_digest, ckpt_key, device, want_gradcam=True,
+            )
 
-        # 使用 matplotlib 渲染叠加图
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-
-        # 模型输入（48×48 灰度）
-        gray_img = image.convert("L")
-        if gray_img.size != (48, 48):
-            gray_img = gray_img.resize((48, 48), Image.Resampling.BILINEAR)
-        axes[0].imshow(gray_img, cmap="gray")
-        axes[0].set_title("模型输入（48×48 灰度）")
-        axes[0].axis("off")
-
-        # 热力图
-        axes[1].imshow(heatmap, cmap="jet", vmin=0, vmax=1)
-        axes[1].set_title("Grad-CAM 热力图")
-        axes[1].axis("off")
-
-        # 叠加图
-        axes[2].imshow(gray_img, cmap="gray")
-        axes[2].imshow(heatmap, cmap="jet", alpha=0.5, vmin=0, vmax=1)
-        axes[2].set_title(f"叠加: {result['emotion']}")
-        axes[2].axis("off")
-
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-
+        st.image(
+            payload_gc["figure_png"],
+            caption=f"左: 模型输入（48×48 灰度） | 中: Grad-CAM 热力图 | "
+                    f"右: 叠加（{result['emotion']}）",
+        )
         st.caption(
             "Grad-CAM 为目标类别的梯度响应辅助图，用于查看模型的高响应区域；"
             "它不构成模型因果机制或心理解释的证据。"

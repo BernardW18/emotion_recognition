@@ -4,6 +4,10 @@
 强制显式传入：checkpoint 路径、数据协议与 split；使用 F01 的统一模型构造
 （含旧权重迁移）与与训练一致的预处理（48×48 灰度、x/255、无测试增强）。
 
+像素来源（PB05）：data/pixel_cache 的 uint8 只读缓存（pinned + non_blocking 传输、
+概率单次回传），与旧逐样本解析路径数值一致（回归覆盖）；数据协议校验
+（Usage 列/未知取值/划分完整性/CSV SHA）在缓存加载或构建时完成。
+
 - 缺失 / 非法 Usage：评估前明确报错（不支持"整个 CSV 当测试集"的回退）
 - 输出：完整指标（accuracy / macro-F1 / balanced accuracy / 各类 recall/support）、
   逐样本行号与预测、概率（可重算 ECE/NLL）、权重与划分指纹
@@ -41,7 +45,8 @@ from sklearn.metrics import (
     f1_score,
 )
 
-from utils.model_spec import file_sha256, load_model_from_checkpoint
+from data.pixel_cache import file_sha256_cached, load_or_build
+from utils.model_spec import load_model_from_checkpoint
 
 logger = logging.getLogger("evaluation")
 
@@ -102,6 +107,37 @@ def _predict_probs(
     probs = torch.cat(probs_list).numpy()
     labels = df["emotion"].to_numpy()
     return probs, labels
+
+
+def _predict_probs_fast(model, x_u8, batch_size: int, device) -> np.ndarray:
+    """
+    对 uint8 像素数组 (N,48,48) 的快速推理（PB05）：与 _predict_probs 数值一致。
+
+    - 输入为 data/pixel_cache 的只读 mmap（uint8）；分批取子集 → float32/255
+    - GPU：pinned + non_blocking 传输；概率在 GPU 上累积后**单次回传**
+      （回传上限 = N × 类别数 × 4B；本项目全部三划分 ≤ 0.8 MiB）
+    - 与旧路径的 batch 划分、softmax 实现与精度（float32）一致
+    """
+    n = len(x_u8)
+    device = torch.device(device)
+    use_pin = device.type == "cuda"
+    probs_gpu = None
+    model.eval()
+    with torch.no_grad():
+        for i in range(0, n, batch_size):
+            chunk = np.asarray(x_u8[i:i + batch_size], dtype=np.float32) / 255.0
+            xb = torch.from_numpy(chunk).unsqueeze(1)
+            xb = (
+                xb.pin_memory().to(device, non_blocking=True)
+                if use_pin else xb.to(device)
+            )
+            logits = model(xb)
+            p = torch.softmax(logits, dim=1)
+            if probs_gpu is None:
+                probs_gpu = torch.empty((n, p.shape[1]), dtype=p.dtype, device=device)
+            probs_gpu[i:i + p.shape[0]] = p
+    assert probs_gpu is not None, "空划分不应到达此处（缓存构建保证非空）"
+    return probs_gpu.cpu().numpy()
 
 
 def compute_ece_nll(probs: np.ndarray, labels: np.ndarray, n_bins: int = 15) -> dict:
@@ -195,14 +231,21 @@ def evaluate_checkpoint(
     """
     csv_path = Path(csv_path) if csv_path is not None else DEFAULT_CSV
     device = torch.device(device)
+    if split not in OFFICIAL_SPLITS:
+        raise ValueError(f"split 必须是 {OFFICIAL_SPLITS} 之一，得到 {split!r}")
 
-    # 先做数据校验（缺失/非法 Usage 在加载模型前报错）
-    sub, row_indices = load_split_dataframe(csv_path, split)
+    # ---- 数据（PB05）：像素缓存快速路径 ----
+    # 数据协议校验（Usage 列/未知取值/划分完整性）与 CSV SHA 绑定在缓存加载/构建时完成；
+    # 像素为 uint8 只读 mmap，推理侧 pinned + non_blocking + 单次概率回传。
+    # 旧的逐样本解析路径（load_split_dataframe / _predict_probs）保留用于对照与测试。
+    pixel_cache = load_or_build(csv_path)
+    x_u8, labels, row_indices = pixel_cache.split_arrays(split)
+    n_samples = int(len(labels))
 
     model, spec, meta = load_model_from_checkpoint(
         checkpoint_path, device=device, spec_override=spec_override
     )
-    probs, labels = _predict_probs(model, sub, batch_size, device)
+    probs = _predict_probs_fast(model, x_u8, batch_size, device)
     metrics = _metrics_from_arrays(probs, labels, list(spec.class_names), n_bins=15)
 
     result = {
@@ -218,8 +261,8 @@ def evaluate_checkpoint(
         "protocol": {
             "split": split,
             "csv_path": str(csv_path),
-            "csv_sha256": file_sha256(csv_path),
-            "n_samples": int(len(sub)),
+            "csv_sha256": file_sha256_cached(csv_path),
+            "n_samples": n_samples,
             "row_index_sha256": hashlib.sha256(row_indices.astype(np.int64).tobytes()).hexdigest(),
             "row_index_first": int(row_indices[0]),
             "row_index_last": int(row_indices[-1]),
@@ -267,7 +310,7 @@ def evaluate_checkpoint(
     result["output_dir"] = str(out_dir)
 
     m = metrics
-    print(f"[评估] {spec.model_name} | {split} | n={len(sub)}")
+    print(f"[评估] {spec.model_name} | {split} | n={n_samples}")
     print(f"  checkpoint: {meta['checkpoint_path']} (sha256={meta['checkpoint_sha256'][:16]}...)")
     print(f"  activation={spec.activation} use_se={spec.use_se} dropout={spec.dropout}")
     print(f"  accuracy={m['accuracy']:.4f} | macro_f1={m['macro_f1']:.4f} | "

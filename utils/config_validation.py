@@ -33,7 +33,7 @@ _ALLOWED_DATALOADER_KEYS = {
     "class_balanced_sampling",
 }
 _ALLOWED_AUG_KEYS = {
-    "enabled", "random_horizontal_flip", "random_rotation", "random_affine_translate",
+    "enabled", "impl", "random_horizontal_flip", "random_rotation", "random_affine_translate",
     "color_jitter_brightness", "color_jitter_contrast", "random_erase",
     "class_specific", "mixup",
 }
@@ -47,7 +47,7 @@ _ALLOWED_TRAINING_KEYS = {
     "activation", "scheduler", "scheduler_step_size", "scheduler_gamma", "scheduler_t0",
     "patience", "val_loss_patience", "val_loss_threshold", "loss_type", "cb_focal_beta",
     "amp", "torch_compile", "torch_compile_mode", "gradient_accumulation_steps",
-    "max_grad_norm", "cudnn_deterministic",
+    "max_grad_norm", "cudnn_deterministic", "optimizer_fused",
 }
 _ALLOWED_MODEL_KEYS = {
     "learning_rate", "batch_size", "num_epochs", "dropout", "activation",
@@ -178,6 +178,9 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
     # ---------------- augmentation ----------------
     aug = _optional_section(config, "augmentation", _ALLOWED_AUG_KEYS)
     _ensure_bool(aug.get("enabled", False), "augmentation.enabled")
+    impl = aug.get("impl", "legacy")
+    if impl not in ("legacy", "batched"):
+        _fail("augmentation.impl", f"必须为 'legacy' 或 'batched'，得到 {impl!r}")
     for key in ("random_horizontal_flip", "random_affine_translate", "color_jitter_brightness",
                 "color_jitter_contrast"):
         if key in aug:
@@ -232,6 +235,9 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
     )
     _ensure_number(tr.get("weight_decay", 0.0), "training.weight_decay", min_value=0.0)
     _ensure_choice(tr.get("optimizer", "adam"), "training.optimizer", _OPTIMIZERS)
+    _ensure_bool(tr.get("optimizer_fused", False), "training.optimizer_fused")
+    if bool(tr.get("optimizer_fused", False)) and tr.get("optimizer", "adam").lower() != "adam":
+        _fail("training.optimizer_fused", "仅支持 optimizer='adam'（fused 实现约束）")
     _ensure_choice(tr.get("activation", "relu"), "training.activation", set(ACTIVATION_REGISTRY))
     _ensure_choice(tr.get("scheduler", "none"), "training.scheduler", _SCHEDULERS)
     if "scheduler_step_size" in tr:

@@ -32,6 +32,7 @@ dataloader:
 # 数据增强
 augmentation:
   enabled: true
+  impl: "batched"                # 增强实现（PB01，与主配置一致）：legacy / batched
   random_horizontal_flip: 0.5
   random_rotation: 10
   random_affine_translate: 0.1
@@ -59,6 +60,7 @@ training:
   learning_rate: 0.001
   weight_decay: 1.0e-4
   optimizer: "adam"
+  optimizer_fused: false          # PB03: fused Adam（仅 CUDA/Adam；默认关闭，验收后决定是否启用）
   activation: "relu"
   scheduler: "cosine_warm"
   scheduler_step_size: 10
@@ -76,12 +78,12 @@ training:
   max_grad_norm: 1.0
   cudnn_deterministic: false
 
-# 模型特定覆盖（数值同主配置；正式比较的"固定共同方案"由协议冻结后统一，见 docs/comparison_protocol_draft.md）
+# 模型特定覆盖（数值同主配置：统一训练预算 comparison-v2 §3.1——LR=3e-4 / batch=128 / epochs=90）
 models:
   mini_cnn:
-    learning_rate: 0.0005
-    batch_size: 256
-    num_epochs: 30
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
     dropout: 0.3
     activation: "relu"
 

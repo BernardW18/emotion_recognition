@@ -30,6 +30,8 @@ RNG / scaler / 早停状态，不支持精确续训，load 时明确报错（不
 
 __all__ = [
     "CHECKPOINT_FORMAT_VERSION",
+    "TRAINING_PROTOCOL_VERSION",
+    "scheduler_effective_dict",
     "collect_git_info",
     "collect_environment_info",
     "write_json_atomic",
@@ -64,6 +66,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 logger = logging.getLogger("checkpoint")
 
 CHECKPOINT_FORMAT_VERSION = 2
+
+# 训练协议快照版本（S01/S02：完整生效配置 + 运行时有效值 + 数据管线规格）
+TRAINING_PROTOCOL_VERSION = 2
 
 # run 根目录：training/runs/
 RUNS_ROOT = PROJECT_ROOT / "training" / "runs"
@@ -233,6 +238,148 @@ def _protocol_diff(reference: dict, current: dict, path: str = "") -> list[str]:
     return diffs
 
 
+def scheduler_effective_dict(scheduler) -> dict | None:
+    """调度器“实际构建参数”快照（S02：声明配置与实际行为的一致性校验）。"""
+    if scheduler is None:
+        return {"name": "none"}
+    out: dict[str, object] = {"name": type(scheduler).__name__}
+    for attr in ("T_0", "T_mult", "T_max", "step_size", "gamma", "patience"):
+        if hasattr(scheduler, attr):
+            value = getattr(scheduler, attr)
+            if isinstance(value, (int, float, str, bool)) or value is None:
+                out[attr] = value
+            else:
+                out[attr] = str(value)
+    return out
+
+
+def _capture_loader_rng(loader) -> dict:
+    """捕获训练 loader 的独立生成器状态（S01：批次序列与 worker 种子复算）。"""
+    sampler = getattr(loader, "sampler", None)
+    g_sampler = getattr(sampler, "generator", None)
+    g_loader = getattr(loader, "generator", None)
+    return {
+        "sampler_generator": (
+            g_sampler.get_state() if isinstance(g_sampler, torch.Generator) else None
+        ),
+        "loader_generator": (
+            g_loader.get_state() if isinstance(g_loader, torch.Generator) else None
+        ),
+    }
+
+
+def _restore_loader_rng(loader, state: dict | None) -> list[str]:
+    """恢复 loader 生成器状态；返回未能恢复项列表。"""
+    if state is None:
+        return ["断点缺少 loader_rng 状态"]
+    failed: list[str] = []
+    sampler = getattr(loader, "sampler", None)
+    g_sampler = getattr(sampler, "generator", None)
+    if state.get("sampler_generator") is not None:
+        if isinstance(g_sampler, torch.Generator):
+            g_sampler.set_state(state["sampler_generator"])
+        else:
+            failed.append("当前 sampler 无独立 generator，无法恢复其状态")
+    g_loader = getattr(loader, "generator", None)
+    if state.get("loader_generator") is not None:
+        if isinstance(g_loader, torch.Generator):
+            g_loader.set_state(state["loader_generator"])
+        else:
+            failed.append("当前 DataLoader 无 generator，无法恢复 base_seed 序列")
+    return failed
+
+
+def _restore_training_state(trainer, checkpoint: dict) -> dict:
+    """
+    状态恢复的共享实现（load_checkpoint 与 S03 自动回滚共用）：
+
+    覆盖 模型/BN、优化器、调度器、AMP scaler、history、训练进度、累计时长、
+    best、早停计数、全局 RNG、loader 生成器；并校验恢复后实际调度器参数
+    与断点记录一致（S02）。
+
+    Returns:
+        {"saved_epoch": int, "rng_failed": list[str]}
+    """
+    # 恢复模型权重（torch.compile 场景同样展开到原始模块）
+    try:
+        getattr(trainer.model, "_orig_mod", trainer.model).load_state_dict(
+            checkpoint["model_state_dict"]
+        )
+    except RuntimeError as e:
+        raise RuntimeError(f"模型结构不匹配，无法加载 checkpoint: {e}") from e
+
+    # 优化器
+    if "optimizer_state_dict" in checkpoint:
+        trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+    # 调度器
+    if "scheduler_state_dict" in checkpoint:
+        if trainer.scheduler is not None:
+            trainer.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            logger.info("  - 调度器状态已恢复（LR 周期连续）")
+    elif trainer.scheduler is not None:
+        logger.warning("  - 断点无调度器状态，调度器保持初始化状态")
+
+    # AMP scaler
+    if "scaler_state_dict" in checkpoint and getattr(trainer, "scaler", None) is not None:
+        trainer.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+        logger.info("  - AMP GradScaler 状态已恢复")
+
+    # 训练历史
+    if "history" in checkpoint:
+        trainer.history = checkpoint["history"]
+
+    # 训练进度
+    history_epochs = len(trainer.history.get("val_acc", []))
+    saved_epoch = checkpoint.get("epoch", 0)
+    if saved_epoch != history_epochs and history_epochs > 0:
+        logger.warning(
+            "Checkpoint epoch (%d) 与 history 长度 (%d) 不一致，使用 history 长度",
+            saved_epoch, history_epochs,
+        )
+        saved_epoch = history_epochs
+    trainer.start_epoch = saved_epoch + 1
+
+    # 累计训练时间
+    trainer._accumulated_train_time = checkpoint.get("training_duration_seconds", 0.0)
+
+    # 本轮 best（值/epoch 恢复，保证“同一后续指标序列触发于相同位置”）
+    best = checkpoint.get("best") or {}
+    trainer.best_val_acc = float(best.get("val_acc", 0.0))
+    trainer.best_epoch = int(best.get("epoch", 0))
+    trainer.best_monitor_value = best.get("monitor_value")
+
+    # 早停计数
+    es = checkpoint.get("early_stop_state") or {}
+    trainer.acc_patience_counter = int(es.get("acc_patience_counter", 0))
+    trainer.loss_worse_counter = int(es.get("loss_worse_counter", 0))
+    trainer.hist_min_val_loss = es.get("hist_min_val_loss")
+
+    # 全局 RNG（python / numpy / torch / cuda）
+    rng_failed: list[str] = []
+    if "rng" in checkpoint:
+        rng_failed = _restore_rng_state(checkpoint["rng"])
+    else:
+        rng_failed = ["断点缺少 RNG 状态"]
+
+    # S01：训练 loader 的独立生成器（批次序列与 worker 种子的复算前提）
+    rng_failed.extend(_restore_loader_rng(trainer.train_loader, checkpoint.get("loader_rng")))
+
+    # S02：恢复后实际调度器参数必须与断点记录一致
+    expected_scheduler = (
+        (checkpoint.get("training_protocol") or {}).get("runtime") or {}
+    ).get("scheduler_effective")
+    if expected_scheduler is not None and trainer.scheduler is not None:
+        actual_scheduler = scheduler_effective_dict(trainer.scheduler)
+        if actual_scheduler != expected_scheduler:
+            raise RuntimeError(
+                "恢复后实际调度器参数与断点记录不一致："
+                f"{actual_scheduler} vs {expected_scheduler}"
+            )
+
+    return {"saved_epoch": saved_epoch, "rng_failed": rng_failed}
+
+
 def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool = False):
     """
     保存完整训练状态（原子写入）。
@@ -279,6 +426,8 @@ def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool
             "hist_min_val_loss": trainer.hist_min_val_loss,
         },
         "rng": _capture_rng_state(),
+        # S01：loader/sampler 独立生成器状态（批次序列与 worker 种子复算）
+        "loader_rng": _capture_loader_rng(trainer.train_loader),
         "training_duration_seconds": getattr(trainer, "_total_train_time", 0.0),
         "class_counts": getattr(trainer, "class_counts", None),
         "partial": partial,
@@ -305,14 +454,20 @@ def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool
 
 def load_checkpoint(trainer, checkpoint_path) -> dict:
     """
-    从 checkpoint 恢复完整训练状态（F09）。
+    从 checkpoint 恢复完整训练状态（F09 / S01 / S02）。
 
-    恢复内容：模型权重、优化器、调度器、AMP scaler、RNG、history、
-    本轮 best（值/epoch）、早停计数、累计训练时间。
+    校验顺序（全部通过后才加载权重/状态；失败不触碰原 run 文件）：
+      格式版本 → model_name/model_spec → 训练协议（完整生效配置 + 数据管线资格）
+      → loader 生成器完整性；随后恢复模型/优化器/调度器/scaler/history/
+      best/早停/RNG/loader 生成器，并校验恢复后实际调度器参数与断点记录一致。
+
+    精确恢复支持范围（S01 实测）：
+      - workers=0；或 workers>=1 且 persistent_workers=False（独立 generator 复算）
+      - persistent_workers=True 的断点/恢复端均明确拒绝
 
     Raises:
         FileNotFoundError: 文件不存在
-        RuntimeError: 文件损坏 / 旧格式 / 模型名或规格不匹配
+        RuntimeError: 文件损坏 / 旧格式 / 规格或协议不一致 / 不满足精确恢复条件
     """
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
@@ -334,15 +489,6 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             f"如确需使用: {checkpoint_path}，请先迁移或从头训练。"
         )
 
-    # R01：精确恢复支持范围检查——多进程数据管线下的恢复一致性未获实测支持
-    loader_workers = getattr(trainer.train_loader, "num_workers", 0)
-    if loader_workers:
-        raise RuntimeError(
-            f"精确恢复要求 num_workers=0（当前 train_loader.num_workers={loader_workers}）。\n"
-            "请先调用 training.trainer.enforce_exact_resume_conditions(config) 并重建 "
-            "DataLoader，或新建 run；多进程数据管线下的恢复一致性不支持。"
-        )
-
     # 模型名与规格校验
     ckpt_model_name = checkpoint.get("model_name", "")
     if ckpt_model_name and ckpt_model_name != trainer.model_name:
@@ -362,86 +508,68 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             "请使用与断点一致的数据/模型配置，或从头训练。"
         )
 
-    # R02：训练协议比对（损失/采样/增强/批/累积/优化器/调度器/monitor/精度/数据指纹）
+    # ---- S02：训练协议校验（完整生效配置 + 运行时有效值 + 数据管线 + 指纹）----
     ckpt_protocol = checkpoint.get("training_protocol")
-    protocol_verified = True
-    protocol_notes: list[str] = []
     if ckpt_protocol is None:
-        protocol_verified = False
-        protocol_notes.append(
-            "断点缺少 training_protocol 记录（早于协议比对引入的版本）："
-            "无法验证配置与数据一致性，本次恢复标记为「协议未验证」"
+        raise RuntimeError(
+            "该断点缺少 training_protocol 记录（早于协议比对引入的版本）：\n"
+            "无法验证配置/数据/数据管线一致性，精确恢复被拒绝（不冒称精确）。\n"
+            "如需继续训练，请以当前配置从头新建 run。"
         )
-        logger.warning("  - %s", protocol_notes[-1])
-    else:
-        protocol_diffs = _protocol_diff(ckpt_protocol, trainer.get_training_protocol())
-        if protocol_diffs:
-            raise RuntimeError(
-                "恢复被拒绝：训练协议与断点不一致（改动训练策略请新建 run）：\n  - "
-                + "\n  - ".join(protocol_diffs)
-            )
-
-    # 恢复模型权重（torch.compile 场景同样展开到原始模块）
-    try:
-        getattr(trainer.model, "_orig_mod", trainer.model).load_state_dict(
-            checkpoint["model_state_dict"]
+    protocol_version = ckpt_protocol.get("protocol_version")
+    if protocol_version != TRAINING_PROTOCOL_VERSION:
+        raise RuntimeError(
+            f"断点训练协议版本 {protocol_version!r} 不受支持"
+            f"（当前 {TRAINING_PROTOCOL_VERSION}）：\n"
+            "旧版本协议缺少完整字段（loader/增强/调度器参数等），精确恢复被拒绝。"
         )
-    except RuntimeError as e:
-        raise RuntimeError(f"模型结构不匹配，无法加载 checkpoint: {e}") from e
 
-    # 优化器
-    if "optimizer_state_dict" in checkpoint:
-        trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-    # 调度器
-    if "scheduler_state_dict" in checkpoint:
-        if trainer.scheduler is not None:
-            trainer.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-            logger.info("  - 调度器状态已恢复（LR 周期连续）")
-    elif trainer.scheduler is not None:
-        logger.warning("  - 断点无调度器状态（残留旧格式？），调度器保持初始化状态")
-
-    # AMP scaler
-    if "scaler_state_dict" in checkpoint and getattr(trainer, "scaler", None) is not None:
-        trainer.scaler.load_state_dict(checkpoint["scaler_state_dict"])
-        logger.info("  - AMP GradScaler 状态已恢复")
-
-    # 训练历史
-    if "history" in checkpoint:
-        trainer.history = checkpoint["history"]
-
-    # 训练进度
-    history_epochs = len(trainer.history.get("val_acc", []))
-    saved_epoch = checkpoint.get("epoch", 0)
-    if saved_epoch != history_epochs and history_epochs > 0:
-        logger.warning(
-            "Checkpoint epoch (%d) 与 history 长度 (%d) 不一致，使用 history 长度",
-            saved_epoch, history_epochs,
+    # ---- S01：数据管线资格检查 ----
+    src_loader_spec = (ckpt_protocol.get("runtime") or {}).get("loader") or {}
+    if src_loader_spec.get("persistent_workers"):
+        raise RuntimeError(
+            "该断点产生于 persistent_workers=True 的数据管线：worker 内部 RNG 进度"
+            "跨会话不可复算，精确恢复不支持。\n"
+            "可选：关闭 persistent_workers（或使用 workers=0）后从头训练以获得精确恢复能力。"
         )
-        saved_epoch = history_epochs
-    trainer.start_epoch = saved_epoch + 1
+    src_workers = int(src_loader_spec.get("num_workers") or 0)
+    if src_workers > 0 and not src_loader_spec.get("has_generators"):
+        raise RuntimeError(
+            f"该断点（num_workers={src_workers}）缺少独立生成器记录：无法复算批次"
+            "序列与 worker 种子，精确恢复不支持。"
+        )
+    resume_loader = trainer.train_loader
+    if bool(getattr(resume_loader, "persistent_workers", False)):
+        raise RuntimeError(
+            "恢复端 train_loader 使用 persistent_workers=True：不支持精确恢复。\n"
+            "请关闭 persistent_workers 后重建 DataLoader，或新建 run。"
+        )
+    resume_workers = int(getattr(resume_loader, "num_workers", 0) or 0)
+    if resume_workers > 0 and getattr(resume_loader, "generator", None) is None:
+        raise RuntimeError(
+            f"恢复端 train_loader（num_workers={resume_workers}）缺少独立 generator："
+            "无法复算批次/增强序列，精确恢复不支持。"
+        )
 
-    # 累计训练时间
-    trainer._accumulated_train_time = checkpoint.get("training_duration_seconds", 0.0)
+    # 完整协议比对（含 loader 规格：num_workers / sampler / batch；恢复端必须与断点一致）
+    protocol_diffs = _protocol_diff(ckpt_protocol, trainer.get_training_protocol())
+    if protocol_diffs:
+        raise RuntimeError(
+            "恢复被拒绝：训练协议与断点不一致（改动训练策略/数据管线请新建 run）：\n  - "
+            + "\n  - ".join(protocol_diffs)
+        )
 
-    # 本轮 best（值/epoch 恢复，保证"同一后续指标序列触发于相同位置"）
-    best = checkpoint.get("best") or {}
-    trainer.best_val_acc = float(best.get("val_acc", 0.0))
-    trainer.best_epoch = int(best.get("epoch", 0))
-    trainer.best_monitor_value = best.get("monitor_value")
+    # S01：loader 生成器状态必须随断点保存（v2 协议断点必含）
+    if checkpoint.get("loader_rng") is None:
+        raise RuntimeError(
+            f"断点缺少 loader_rng（loader/sampler 生成器状态），无法复算批次序列: "
+            f"{checkpoint_path}"
+        )
 
-    # 早停计数
-    es = checkpoint.get("early_stop_state") or {}
-    trainer.acc_patience_counter = int(es.get("acc_patience_counter", 0))
-    trainer.loss_worse_counter = int(es.get("loss_worse_counter", 0))
-    trainer.hist_min_val_loss = es.get("hist_min_val_loss")
-
-    # RNG（批次顺序一致性）
-    rng_failed = []
-    if "rng" in checkpoint:
-        rng_failed = _restore_rng_state(checkpoint["rng"])
-    else:
-        rng_failed = ["断点缺少 RNG 状态"]
+    # ---- 全部校验通过：恢复训练状态（与 S03 自动回滚共享实现）----
+    restore_info = _restore_training_state(trainer, checkpoint)
+    saved_epoch = restore_info["saved_epoch"]
+    rng_failed = restore_info["rng_failed"]
 
     # partial 标注
     if checkpoint.get("partial"):
@@ -453,6 +581,7 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
 
     logger.info("已从 %s 恢复训练:", checkpoint_path)
     logger.info("  - 上次训练到 epoch %s", checkpoint.get("epoch", "?"))
+    best = checkpoint.get("best") or {}
     logger.info("  - 本轮 best: %s=%.4f (epoch %d)",
                 best.get("monitor_metric", "val_acc"),
                 float(best.get("monitor_value", best.get("val_acc", 0.0)) or 0.0),
@@ -465,10 +594,8 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
     if rng_failed:
         logger.warning("  - RNG 恢复不完整: %s（批次顺序可能不一致）", rng_failed)
 
-    # R02：恢复成功后才写恢复事件（此前任何失败都不会改写原 run 元数据）
-    trainer._record_resume_event(
-        checkpoint_path, protocol_verified=protocol_verified, notes=protocol_notes
-    )
+    # 恢复成功后才写恢复事件（此前任何失败都不会改写原 run 元数据）
+    trainer._record_resume_event(checkpoint_path, protocol_verified=True, notes=[])
 
     return checkpoint
 
