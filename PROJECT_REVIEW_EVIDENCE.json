@@ -163,11 +163,6 @@
     "python_version": "3.10.11",
     "default_platform": "Windows"
   },
-  "proposed_gap_head": {
-    "parameters": 127943,
-    "implemented_in_project": false,
-    "trained": false
-  },
   "audit_scope": {
     "application_code_modified": false,
     "training_rerun": false,
@@ -892,5 +887,269 @@
     "audit_did_not_remove_these_files": true
   },
   "environment_lock_file": "requirements-review-lock.txt",
-  "temporary_audit_scripts_removed": true
+  "temporary_audit_scripts_removed": true,
+  "review_update": {
+    "updated_on": "2026-10-07",
+    "scope": "Repair and validate the existing FER2013 project, MiniCNN, VGGLite, MicroResNet only",
+    "new_research_question": false,
+    "new_architecture": false,
+    "new_dataset": false,
+    "issue_count": 20,
+    "all_issues_have_fix_plan_acceptance_and_status": true,
+    "application_code_modified": false,
+    "formal_training_rerun": false,
+    "cuda_environment_status": "Verified Windows .venv: torch 2.14.1+cu130, torchvision 0.29.1+cu130, real CUDA tensor and torchvision operation, three current models FP32/AMP updates, 36 existing tests passed",
+    "completed_issue_ids": [
+      "F20"
+    ]
+  },
+  "historical_evaluation_environment_field": "runtime_environment describes the previous CPU full-data evaluation; cuda_environment describes the current GPU capability checks; full training has not been rerun",
+  "cuda_environment": {
+    "checked_on": "2026-10-07",
+    "python": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:38:17) [MSC v.1929 64 bit (AMD64)]",
+    "executable": "D:\\Document\\Unniversity\\emotion_recognition\\.venv\\Scripts\\python.exe",
+    "torch": "2.14.1+cu130",
+    "torchvision": "0.29.1+cu130",
+    "cuda_runtime": "13.0",
+    "cuda_available": true,
+    "cudnn": 92400,
+    "gpu": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "capability": [
+      12,
+      0
+    ],
+    "compiled_architectures": [
+      "sm_75",
+      "sm_80",
+      "sm_86",
+      "sm_90",
+      "sm_100",
+      "sm_120"
+    ],
+    "gpu_memory_bytes": 12820480000,
+    "driver": "596.49",
+    "scope": "16 synthetic samples per case; original saved model specs and current Trainer; no fit() or formal checkpoint export",
+    "cases": [
+      {
+        "model": "mini_cnn",
+        "mode": "FP32",
+        "model_spec": {
+          "activation": "relu",
+          "dropout": 0.3
+        },
+        "samples": 16,
+        "batch_size": 4,
+        "requested_batches": 4,
+        "optimizer_steps": 4,
+        "output_dtypes": [
+          "torch.float32"
+        ],
+        "matmul_precision": "high",
+        "all_forward_outputs_finite": true,
+        "all_unscaled_gradients_finite_at_optimizer_step": true,
+        "all_parameters_finite": true,
+        "updated_parameter_tensors": 16,
+        "train_loss": 3.9278454780578613,
+        "validation_loss": 3.4617390632629395,
+        "passed": true
+      },
+      {
+        "model": "mini_cnn",
+        "mode": "AMP_float16",
+        "model_spec": {
+          "activation": "relu",
+          "dropout": 0.3
+        },
+        "samples": 16,
+        "batch_size": 4,
+        "requested_batches": 4,
+        "optimizer_steps": 2,
+        "output_dtypes": [
+          "torch.float16"
+        ],
+        "matmul_precision": "high",
+        "all_forward_outputs_finite": true,
+        "all_unscaled_gradients_finite_at_optimizer_step": true,
+        "all_parameters_finite": true,
+        "updated_parameter_tensors": 16,
+        "train_loss": 3.9668636322021484,
+        "validation_loss": 3.587456703186035,
+        "passed": true,
+        "scaler_final_scale": 16384.0,
+        "overflow_skipped_steps": 2
+      },
+      {
+        "model": "vgg_lite",
+        "mode": "FP32",
+        "model_spec": {
+          "activation": "relu",
+          "dropout": 0.5
+        },
+        "samples": 16,
+        "batch_size": 4,
+        "requested_batches": 4,
+        "optimizer_steps": 4,
+        "output_dtypes": [
+          "torch.float32"
+        ],
+        "matmul_precision": "high",
+        "all_forward_outputs_finite": true,
+        "all_unscaled_gradients_finite_at_optimizer_step": true,
+        "all_parameters_finite": true,
+        "updated_parameter_tensors": 26,
+        "train_loss": 2.4615540504455566,
+        "validation_loss": 1.9271321296691895,
+        "passed": true
+      },
+      {
+        "model": "vgg_lite",
+        "mode": "AMP_float16",
+        "model_spec": {
+          "activation": "relu",
+          "dropout": 0.5
+        },
+        "samples": 16,
+        "batch_size": 4,
+        "requested_batches": 4,
+        "optimizer_steps": 3,
+        "output_dtypes": [
+          "torch.float16"
+        ],
+        "matmul_precision": "high",
+        "all_forward_outputs_finite": true,
+        "all_unscaled_gradients_finite_at_optimizer_step": true,
+        "all_parameters_finite": true,
+        "updated_parameter_tensors": 26,
+        "train_loss": 2.7085230350494385,
+        "validation_loss": 2.412261724472046,
+        "passed": true,
+        "scaler_final_scale": 32768.0,
+        "overflow_skipped_steps": 1
+      },
+      {
+        "model": "micro_resnet",
+        "mode": "FP32",
+        "model_spec": {
+          "activation": "gelu",
+          "dropout": 0.3
+        },
+        "samples": 16,
+        "batch_size": 4,
+        "requested_batches": 4,
+        "optimizer_steps": 4,
+        "output_dtypes": [
+          "torch.float32"
+        ],
+        "matmul_precision": "high",
+        "all_forward_outputs_finite": true,
+        "all_unscaled_gradients_finite_at_optimizer_step": true,
+        "all_parameters_finite": true,
+        "updated_parameter_tensors": 44,
+        "train_loss": 3.063096046447754,
+        "validation_loss": 4.332306861877441,
+        "passed": true
+      },
+      {
+        "model": "micro_resnet",
+        "mode": "AMP_float16",
+        "model_spec": {
+          "activation": "gelu",
+          "dropout": 0.3
+        },
+        "samples": 16,
+        "batch_size": 4,
+        "requested_batches": 4,
+        "optimizer_steps": 2,
+        "output_dtypes": [
+          "torch.float16"
+        ],
+        "matmul_precision": "high",
+        "all_forward_outputs_finite": true,
+        "all_unscaled_gradients_finite_at_optimizer_step": true,
+        "all_parameters_finite": true,
+        "updated_parameter_tensors": 44,
+        "train_loss": 3.1397347450256348,
+        "validation_loss": 4.511641502380371,
+        "passed": true,
+        "scaler_final_scale": 16384.0,
+        "overflow_skipped_steps": 2
+      }
+    ],
+    "gpu_tensor_fixture_passed": true,
+    "torchvision_cuda_nms_fixture_passed": true,
+    "source_artifacts_verified_unchanged": true,
+    "protected_file_hashes": {
+      "data\\fer2013.csv": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+      "training\\logs\\mini_cnn\\history.json": "2f5e56c9bc870c1a1ae0bcbdfd52e8b99ca772d98ce862687152e982bb4cca74",
+      "inference\\saved_models\\mini_cnn_best.pth": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",
+      "training\\logs\\vgg_lite\\history.json": "e7bdefc3314274a8b16e02ebd30d69f415bc2517ea9654e89e750652b4cf5132",
+      "inference\\saved_models\\vgg_lite_best.pth": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7",
+      "training\\logs\\micro_resnet\\history.json": "958892a42800c694a595fb8b0996021530c2e4111677c76bd7d1293dc9928f27",
+      "inference\\saved_models\\micro_resnet_best.pth": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698"
+    },
+    "passed": true,
+    "existing_tests": {
+      "exit_code": 0,
+      "output": "....................................                                     [100%]\n36 passed in 2.30s\n",
+      "torch": "2.14.1+cu130",
+      "cuda_available": true,
+      "trainer_paths_isolated": true,
+      "test_device": "CPU, as specified by existing test fixtures"
+    },
+    "pip_check": {
+      "passed": true,
+      "output": "No broken requirements found."
+    },
+    "cli_help_passed": true,
+    "notebook_kernel_interpreter_verified": true,
+    "test_isolation_setup_note": "First isolated test invocation omitted configs/training_config.yaml; after copying the same project configuration into the isolated root, all 36 tests passed; no project source was modified",
+    "validation_protocol": {
+      "seed": 42,
+      "input": "torch.rand(16,1,48,48)",
+      "labels": "torch.arange(16) % 7",
+      "batch_size": 4,
+      "num_workers": 0,
+      "shuffle": false,
+      "optimizer": "Adam",
+      "learning_rate": 0.0001,
+      "weight_decay": 0.0001,
+      "loss": "FocalLoss(gamma=2.0)",
+      "max_grad_norm": 1.0,
+      "gradient_accumulation_steps": 1,
+      "amp_initial_scale": 65536,
+      "matmul_precision": "high",
+      "formal_fit_called": false,
+      "formal_checkpoint_exported": false
+    },
+    "temporary_validation_files_removed": true
+  },
+  "cuda_download_handoff_history": {
+    "requested_torch": "2.14.1+cu130",
+    "requested_torchvision": "0.29.1+cu130",
+    "cuda_runtime_target": "13.0",
+    "gpu_name": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "driver": "596.49",
+    "gpu_memory_mib": 12227,
+    "installed_torch": "2.14.1+cpu",
+    "installed_torchvision": "0.29.1+cpu",
+    "cuda_available": false,
+    "cuda_installation_completed": false,
+    "gpu_validation_performed": false,
+    "pip_check_passed": true,
+    "torch_url": "https://download.pytorch.org/whl/cu130/torch-2.14.1%2Bcu130-cp310-cp310-win_amd64.whl",
+    "torch_alternative_url": "https://mirrors.nju.edu.cn/pytorch/whl/cu130/torch-2.14.1%2Bcu130-cp310-cp310-win_amd64.whl",
+    "torch_expected_bytes": 1990591400,
+    "torch_official_sha256": "af506e69a93c4769f00a3b1ab06f6e5c3a0c81d8dcea68663331a1b74a21f1fc",
+    "torchvision_path": ".venv\\wheelhouse\\torchvision-0.29.1+cu130-cp310-cp310-win_amd64.whl",
+    "torchvision_bytes": 6566271,
+    "torchvision_sha256": "8c939b759ab51653bcaba4655a16c3349e5f57b7869341c41e20d9eac66b991d",
+    "torchvision_verified": true,
+    "all_download_attempts_stopped": true,
+    "download_status": "user_handoff",
+    "partial_torch_files_are_not_installable": true,
+    "temporary_partial_downloads_removed": true,
+    "original_csv_and_weights_verified_unchanged": true,
+    "record_is_historical": true,
+    "current_status_replaced_by": "cuda_environment"
+  }
 }

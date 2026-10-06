@@ -8,26 +8,51 @@
 
 项目已经覆盖数据分析、三个 CNN、训练、断点保存、类别不平衡处理、评估和推理演示，能够作为课程项目及入组申请的基础。当前最主要的障碍是：推理没有按训练配置构造模型，参数量表述错误，数据存在跨划分重复，实验产物不能完整追溯，早停与续训行为不可靠。修复后应以“完成并核验一个可复现的 FER2013 表情分类流程”介绍项目，明确自己的工作及结果限制。
 
-本文中的“验收标准”是后续修复需要满足的条件，不能当作已通过的检查。除 F20 的环境建设外，本轮只更新文档及证据，不修改应用代码，不启动正式训练。P0 表示正式重训前需要完成，P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成。
+本文中的“验收标准”是各项修复需要满足的条件。本轮已完成 F20 的 Windows CUDA 环境检查并更新文档、证据和依赖快照；其余问题仍按各自状态列为待办，不修改应用代码，不启动正式训练。P0 表示正式重训前需要完成，P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成。
 
-## Windows 环境与 CUDA
+## Windows CUDA 环境：已安装并验收
 
-本项目统一使用 Windows 虚拟环境：`D:\Document\Unniversity\emotion_recognition\.venv\Scripts\python.exe`，Python 3.10.11。Notebook 使用 `Emotion Recognition (.venv)` 内核。除非用户另有要求，后续在本项目建立和使用 Windows 环境；`D:\AI` 的 WSL 约定不扩展到本项目。
+本项目统一使用 Windows 虚拟环境：`D:\Document\Unniversity\emotion_recognition\.venv\Scripts\python.exe`。本轮已检查用户安装后的实际环境；后续 Python 操作继续使用这个解释器。Notebook 的 `Emotion Recognition (.venv)` 内核也已核对指向此路径。`D:\AI` 的 WSL 约定不扩展到本项目。
 
-本机检测到 NVIDIA GeForce RTX 5070 Ti Laptop GPU，驱动 596.49，显存 12,227 MiB。本轮选择官方 CUDA 13.0 轮子，保留 PyTorch 2.14.1、torchvision 0.29.1 的版本组合。CUDA 版 PyTorch 自带运行所需的 CUDA 库；运行本项目的普通训练不需要另外安装完整 CUDA Toolkit。完整 Toolkit 主要用于编译 CUDA 扩展等用途。选择依据为 [PyTorch 发布配置](https://github.com/pytorch/pytorch/blob/main/RELEASE.md)和 [NVIDIA CUDA 13.2 发布说明中的驱动兼容规则](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-toolkit-release-notes/index.html)。
+| 项目 | 本轮实测 |
+|---|---|
+| Python | 3.10.11，Windows 64 位 |
+| PyTorch / torchvision | 2.14.1+cu130 / 0.29.1+cu130 |
+| CUDA runtime / cuDNN | 13.0 / 记录于证据文件 |
+| GPU / 驱动 | NVIDIA GeForce RTX 5070 Ti Laptop GPU / 596.49 |
+| 显存 | 12,227 MiB |
+| CUDA 可用性 | True；实际 GPU 运算通过 |
+| 设备计算能力 / 已编译支持 | 12.0；安装包包含 sm_120 |
+| 依赖一致性 | `pip check` 通过 |
+| Notebook 内核 | 指向本项目 Windows `.venv` |
 
-CUDA_INSTALL_STATUS: CUDA 版 PyTorch 下载与安装正在进行；完成后以实际 GPU 运算及现有模型的 FP32/AMP 检查更新此处。不能仅凭安装命令或显卡名称认定训练环境可用。
+**当前状态：F20 已完成环境验收。** GPU 矩阵运算与 CPU 固定小例子一致，torchvision 的 CUDA NMS 固定小例子通过；三个现有模型均用当前 Trainer 完成 GPU 前向、反向和有效参数更新。训练 `--help` 正常，现有 36 项测试在新 CUDA 包环境下通过；这些既有测试的设备仍按原测试设定为 CPU，GPU 执行由单独的三模型检查覆盖。
+
+三模型检查按已有 checkpoint 的 activation/dropout 构造，MicroResNet 使用保存的 GELU 配置。每个模式使用 16 个合成样本，batch=4，共 4 个批次，梯度累积=1、Adam、学习率 1e-4、Focal Loss。所有输出、loss、更新后的参数以及实际优化器更新前的反缩放梯度均为有限值；模型参数确实改变。FP32 路径沿用当前 Trainer 的 `matmul_precision=high` 设置，未声称严格最高精度模式下的结果。
+
+| 模型 | FP32 有效更新 / 批次 | AMP 有效更新 / 批次 | AMP 跳过更新数 | AMP 最终 loss scale | 结论 |
+|---|---:|---:|---:|---:|---|
+| MiniCNN | 4/4 | 2/4 | 2 | 16,384 | 两模式均通过 |
+| VGGLite | 4/4 | 3/4 | 1 | 32,768 | 两模式均通过 |
+| MicroResNet（GELU） | 4/4 | 2/4 | 2 | 16,384 | 两模式均通过 |
+
+AMP 使用默认 GradScaler 初始 scale=65,536；检查中发生少量缩放梯度溢出，scaler 跳过对应更新并降低 scale，之后执行了有限梯度的有效更新。这属于动态缩放处理，本次已记录跳过次数，不能写成“所有批次均完成更新”或“从未发生溢出”。完整训练时仍需监控持续跳步、loss 与参数的有限性，并按 F09 保存 scaler 状态。
+
+所有检查输出隔离在系统临时目录；原 CSV、三份正式 history.json、三份导出权重的 SHA-256 在检查前后相同。没有运行正式 `fit()`，没有导出新权重。检查只验收 GPU 执行与最小更新流程；整套 FER2013 重训、最佳 batch、AMP 加速比和准确率仍按本文后续修复及实验标准验收。
+
+[requirements-review-lock.txt](requirements-review-lock.txt) 已更新为实际 CUDA 环境快照，使用 cu130 包源。证据文件的 `runtime_environment` 保留此前完整数据 CPU 评估的环境；新的 `cuda_environment` 记录本轮 GPU 检查，旧下载交接仅作为历史记录保留。此前 CPU 结果表不会因安装 CUDA 自动变成 GPU 评估结果。
+
+当前不需要重复安装。若以后重建本项目 Windows 环境，可使用下面的固定版本命令；完整项目的可编辑安装仍需先修复 F04：
 
 ```powershell
-# 在 emotion_recognition 目录运行；本对话所有 Python 操作均使用这个解释器。
-& .\.venv\Scripts\python.exe -m pip install --no-cache-dir 'torch==2.14.1+cu130' 'torchvision==0.29.1+cu130' --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
+# 仅在重建环境时安装；本轮已安装并验证。
+& .\.venv\Scripts\python.exe -m pip install 'torch==2.14.1+cu130' 'torchvision==0.29.1+cu130' --index-url https://download.pytorch.org/whl/cu130
 & .\.venv\Scripts\python.exe -m pip check
-& .\.venv\Scripts\python.exe -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
-& .\.venv\Scripts\python.exe training/train.py --help
-& .\.venv\Scripts\python.exe -m streamlit run inference/app.py
+# 随时可运行的简短 GPU 状态检查。
+& .\.venv\Scripts\python.exe -c "import torch; print(torch.__version__,torch.version.cuda,torch.cuda.is_available()); print(torch.cuda.get_device_name(0)); x=torch.arange(16,dtype=torch.float32,device='cuda').reshape(4,4); print((x@x.T).device)"
 ```
 
-上述环境命令不等于修复项目的构建后端；可编辑安装失败仍属于 F04。当前环境快照为 [requirements-review-lock.txt](requirements-review-lock.txt)。之前的完整数据评估使用 CPU 版 PyTorch 2.14.1+cpu，其环境记录保留在证据文件的 `runtime_environment` 字段；切换 CUDA 不会把这些历史测量变成 GPU 测量。
+若正在运行的 Notebook 仍显示旧版本，重启 `Emotion Recognition (.venv)` 内核。普通 PyTorch 训练使用轮子内的 CUDA 运行库，无需为本项目另装完整 CUDA Toolkit。版本选择参考 [PyTorch 发布配置](https://github.com/pytorch/pytorch/blob/main/RELEASE.md)和 [NVIDIA 驱动兼容规则](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-toolkit-release-notes/index.html)。
 
 ## 现有结果与已确认事实
 
@@ -272,13 +297,13 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 
 **问题及位置：** 应用将最大 Softmax 值显示为“置信度”，但未校准。此前 PrivateTest、15 个等宽区间估计的 ECE 分别为 0.1123/0.2144/0.0645，只能描述该次测量。
 
-**修复方案：** 当前最小修复是将界面文案改为“模型概率（未校准）”，保留已有输出，不新增必须完成的校准研究。若报告 ECE/NLL，明确公式、区间、数据划分和权重；未来如实现温度缩放，只在 PublicTest 拟合并冻结，PrivateTest 仅评估。
+**修复方案：** 将界面文案改为“模型概率（未校准）”，保留已有输出，不引入新的校准方法。对当前概率输出报告 ECE/NLL 时，明确公式、区间、数据划分和权重；修复模型加载后如重新计算这些数值，保留测量版本，不能沿用不匹配权重的旧数字。
 
 **验收标准：**
 
 - 应用、README 和报告没有把 0.9 等同于“90% 会预测正确”的承诺；未校准状态明确。
 - ECE/NLL 报告能够从保存概率与标签重算，概率有限、归一化正确，注明 15 区间及权重/划分。
-- 不以更改术语冒充已经完成校准；如增加校准，其拟合样本不包含 PrivateTest。温度缩放不作为本轮修复的必选交付。
+- 不以更改术语冒充已完成校准；未实施校准时，所有对外材料均保留“未校准”说明。
 
 **状态：** 已确认表达问题，待修复。
 
@@ -298,7 +323,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 
 ### F18 · P1 · 质量工具与 CI 状态不能支撑质量承诺
 
-**问题及位置：** 此前 36 项测试通过，但多为基础行为；Ruff 发现 142 项问题，mypy 被 `trainer` / `training.trainer` 重复模块映射阻断，配置中的 Python 3.9 与当前工具不兼容。工作区 CI 文件此前已删除，README 仍有 badge，工具列出不代表执行通过。
+**问题及位置：** 此前 36 项测试通过，本轮在 CUDA 包环境中复跑也通过，但多为基础行为；Ruff 此前发现 142 项问题，mypy 被 `trainer` / `training.trainer` 重复模块映射阻断，配置中的 Python 3.9 与当前工具不兼容。工作区 CI 文件此前已删除，README 仍有 badge，工具列出不代表执行通过。
 
 **修复方案：** 先统一包边界/导入方式与 Python 3.10 配置，使 mypy 真正运行；逐项处理 Ruff 发现，必要忽略需有局部理由，不能全面关闭规则掩盖问题。为 F01/F05/F08/F09/F10/F13/F14 加入关键回归检查。CI 文件删除若为既有意图，就移除失效 badge；如恢复 CI，按真实执行结果展示状态。测试输出隔离在临时目录，不能污染正式 run。
 
@@ -333,17 +358,17 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 **验收标准：**
 
 - 解释器路径属于本项目 `.venv\Scripts`，torch/torchvision 版本为指定 CUDA 组合，`pip check` 通过，Notebook 内核仍指向此解释器。
-- `torch.cuda.is_available()` 为 True，设备为本机 RTX 5070 Ti Laptop；GPU 张量计算完成且数值有限，现有三模型的 FP32/AMP loss、梯度和参数更新均有限且确实有更新。
+- `torch.cuda.is_available()` 为 True，设备为本机 RTX 5070 Ti Laptop；实际 GPU 张量计算通过，三模型 FP32/AMP 的前向输出、loss 与参数有限，实际更新前的反缩放梯度有限，每个模式均有有效更新。AMP 动态缩放跳过的更新须记录；持续跳步或非有限参数不能通过。
 - 现有测试在新环境和隔离输出目录中通过，训练 `--help` 正常；原 CSV、日志和权重 SHA-256 保持不变。
 - 环境验收只证明具备 GPU 运算及最小训练能力；正式整轮训练、最佳 batch、性能倍数与准确率需要在代码修复后另行验收。
 
-**状态：** CUDA_ENV_STATUS: 正在安装与验证。
+**状态：** 已完成（2026-10-07）：版本、依赖、Notebook 解释器、真实 GPU/torchvision 运算、三模型 FP32/AMP 有效更新、36 项既有测试和训练帮助均通过。AMP 启动时跳过更新的次数已披露，正式数据训练及性能实验尚未执行。
 
 ## 修复顺序和正式重训的进入条件
 
 | 阶段 | 执行内容 | 阶段完成条件 |
 |---|---|---|
-| 1 · 环境 | F20 CUDA、F04 安装入口 | 本机 GPU 运算及三模型 FP32/AMP 检查通过；另一个空 Windows 环境可按说明安装 |
+| 1 · 环境 | F20 CUDA、F04 安装入口 | F20 已验收；F04 构建后端与干净环境安装入口仍待修复 |
 | 2 · 正确性 | F01、F05、F06、F08、F09、F10、F13；使用累积时完成 F14 | 加载/配置/早停/续训/评估关键回归通过，独立 run 不混用旧产物 |
 | 3 · 数据与口径 | F02、F03，冻结 F07/F11 比较方案 | 参数修正，官方协议披露或附加去重协议明确，训练设置与 seed 提前固定 |
 | 4 · 当前模型重训 | 现有三模型；按需要验证既有不平衡选项与 AMP（F07/F11/F12） | 全部运行可追溯，完整结果和波动如实报告；不要求预设提升 |
@@ -355,8 +380,11 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 
 ## 本轮交付及证据边界
 
-本轮交付为本评估文档、证据摘要和当前 Windows CUDA 环境快照。已移除此前分类头压缩、低样本新问题、其他数据集以及论文迁移路线。代码修复、重训、课程报告/PPT/README 的内容同步仍是明确待办。
+本轮交付为本评估文档、证据摘要及已验收的 Windows CUDA 环境快照。用户已安装 CUDA 版 PyTorch，本轮完成环境和最小训练能力检查。已移除此前分类头压缩、低样本新问题、其他数据集以及论文迁移路线。代码修复、重训、课程报告/PPT/README 的内容同步仍是明确待办。
 
-之前的证据包括：完整 CSV 检查、三个现有权重的 CPU 评估、错误激活加载对照、续训与早停探针、36 项测试、Ruff/mypy 检查、无上传图片的应用启动及三个 Grad-CAM 基础检查。现有导出权重与各自 global_best.pth 的 SHA-256 一致。没有完成从头训练复现，也没有验证真实生活照交互或完整 GPU 性能。新增 CUDA 检查单独记录，不覆盖上述历史环境和结果。
+之前的证据包括：完整 CSV 检查、三个现有权重的 CPU 评估、错误激活加载对照、续训与早停探针、36 项测试、Ruff/mypy 检查、无上传图片的应用启动及三个 Grad-CAM 基础检查。现有导出权重与各自 global_best.pth 的 SHA-256 一致。没有完成从头训练复现，也没有验证真实生活照交互或完整 GPU 性能。本轮 CUDA 检查单独记录于 `cuda_environment`，覆盖真实张量运算、torchvision CUDA 运算及三模型 FP32/AMP 更新；不覆盖上述历史完整数据评估结果，也未验证完整训练性能。
 
 本次不恢复工作区已有的 `.github/workflows/ci.yml` 与 `emotion_recognition.code-workspace` 删除，不修改原数据、旧日志、正式权重或既有 Notebook/报告。
+
+
+

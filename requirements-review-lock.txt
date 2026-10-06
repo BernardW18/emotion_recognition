@@ -1,6 +1,6 @@
-# Windows Python 3.10 audit environment, captured 2026-10-07.
-# This is not the historical GPU training environment.
---extra-index-url https://download.pytorch.org/whl/cpu
+# Windows Python 3.10.11 CUDA 13.0 environment, verified 2026-10-07.
+# This is the current checked environment, not the historical full-training environment.
+--extra-index-url https://download.pytorch.org/whl/cu130
 altair==6.2.2
 anyio==4.15.1
 argon2-cffi==25.1.0
@@ -132,8 +132,8 @@ threadpoolctl==3.7.0
 tinycss2==1.5.1
 toml==0.10.2
 tomli==2.4.1
-torch==2.14.1+cpu
-torchvision==0.29.1+cpu
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
 tornado==6.5.10
 tqdm==4.70.1
 traitlets==5.16.1
