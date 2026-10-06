@@ -1,14 +1,22 @@
 # ============================================================
-# FER2013 情感识别 — 依赖声明
+# FER2013 情感识别 — 依赖安装入口（Windows + CUDA 13.0）
 # ============================================================
-# 所有依赖定义在 pyproject.toml 中。
+# 推荐方式（与已验证环境一致的 CUDA 组合，一条命令装齐）:
+#   python -m pip install --upgrade pip      # 先升级 pip（见下方注意）
+#   pip install -r requirements.txt
 #
-# 安装:
-#   pip install -e .
+# 等价手工步骤:
+#   1) pip install torch==2.14.1+cu130 torchvision==0.29.1+cu130 \
+#          --index-url https://download.pytorch.org/whl/cu130
+#   2) pip install -e ".[dev]"
 #
-# 安装含开发工具 (pytest / ruff / mypy / jupyter):
-#   pip install -e ".[dev]"
-#
-# 如需生成精确锁定版本:
-#   pip freeze > requirements-lock.txt
+# 注意:
+# 1) 新建虚拟环境中的旧 pip 曾出现 CUDA 组合解析失败（typing-extensions
+#    名称规范化问题），因此请先 `python -m pip install --upgrade pip`。
+# 2) 不要在未装 CUDA torch 前直接 `pip install -e .`
+#（依赖解析会从 PyPI 拉取 CPU 版 torch，与已验证环境不一致）。
 # ============================================================
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
+-e .[dev]

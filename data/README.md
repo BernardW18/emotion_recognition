@@ -26,3 +26,6 @@
 - `fer2013.csv` 不纳入 Git 版本控制（文件较大）
 - 下载后放置于本目录即可
 - 数据集存在类别不平衡问题，Disgust 类样本极少
+- 数据存在跨划分的完全重复像素（PublicTest 280 条、PrivateTest 288 条与 Training 重复），
+  详细披露与敏感性分析见 [docs/data_audit.md](../docs/data_audit.md)；
+  可复跑审计：`python tools/data_audit.py`

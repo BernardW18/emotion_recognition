@@ -15,7 +15,7 @@ Class-Balanced Focal Loss（CVPR 2019）：
 用法:
     from utils.losses import FocalLoss, CBFocalLoss
     criterion = FocalLoss(gamma=2.0)
-    cb_criterion = CBFocalLoss(gamma=2.0, beta=0.999, class_counts=[4953, 436, ...])
+    cb_criterion = CBFocalLoss(gamma=2.0, beta=0.999, class_counts=[3995, 436, ...])
 """
 
 import torch
@@ -102,7 +102,7 @@ class CBFocalLoss(nn.Module):
         self,
         gamma: float = 2.0,
         beta: float = 0.999,
-        class_counts: list = None,
+        class_counts: list | None = None,
         reduction: str = "mean",
     ):
         super().__init__()
@@ -110,6 +110,11 @@ class CBFocalLoss(nn.Module):
             raise ValueError(f"beta 必须在 [0, 1) 范围内，当前 beta={beta}")
         if class_counts is None or len(class_counts) == 0:
             raise ValueError("class_counts 不能为空，请提供各类别的样本数列表")
+        if any(int(c) <= 0 for c in class_counts):
+            raise ValueError(
+                f"class_counts 含非正数（零样本类别）: {class_counts}；"
+                "请检查数据划分或改用其他损失函数（不压缩类别索引、不静默跳过）"
+            )
 
         self.gamma = gamma
         self.beta = beta
@@ -124,6 +129,7 @@ class CBFocalLoss(nn.Module):
         freq = n_j / n_j.sum()
         mean_weight = (raw_weights * freq).sum()
         normalized_weights = raw_weights / mean_weight
+        self._cb_weights: torch.Tensor
         self.register_buffer("_cb_weights", normalized_weights)
 
     def forward(
@@ -147,7 +153,7 @@ class CBFocalLoss(nn.Module):
             pt = torch.exp(-ce_loss)
             focal_weight = (1 - pt) ** self.gamma
         else:
-            focal_weight = 1.0
+            focal_weight = torch.ones_like(ce_loss)
 
         # CB 权重：每个样本根据其类别获取对应的 CB 权重
         # 将 _cb_weights 移到与 targets 相同的设备（CUDA/CPU）

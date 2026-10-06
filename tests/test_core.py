@@ -13,10 +13,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import pytest
-import torch
 import numpy as np
 import pandas as pd
+import pytest
+import torch
 
 
 # ============================================================
@@ -64,7 +64,7 @@ class TestModels:
     @pytest.fixture
     def model_cls(self, model_name):
         """按 model_name 返回对应的模型类"""
-        from models import MiniCNN, VGGLite, MicroResNet
+        from models import MicroResNet, MiniCNN, VGGLite
         return {"mini_cnn": MiniCNN, "vgg_lite": VGGLite, "micro_resnet": MicroResNet}[model_name]
 
     @pytest.fixture
@@ -144,8 +144,9 @@ class TestFER2013Dataset:
 
     def test_transform_applied(self, sample_dataframe):
         """指定 transform 时应被应用"""
-        from data.dataloader import FER2013Dataset
         from torchvision import transforms
+
+        from data.dataloader import FER2013Dataset
 
         transform = transforms.Compose([transforms.Normalize([0.5], [0.5])])
         dataset = FER2013Dataset(sample_dataframe, transform=transform)
@@ -166,40 +167,49 @@ class TestTrainer:
                 "learning_rate": 0.001, "weight_decay": 1e-4,
                 "optimizer": "adam", "scheduler": "none", "amp": False,
                 "gradient_accumulation_steps": 1, "max_grad_norm": 1.0,
+                "loss_type": "focal", "val_loss_patience": 0, "val_loss_threshold": 1.05,
+                "cudnn_deterministic": False,
             },
-            "models": {"mini_cnn": {}},
-            "augmentation": {"enabled": False},
-            "checkpoint": {"save_every_n_epochs": 5},
-            "data": {"class_names": ["A", "B", "C"]},
+            "models": {"mini_cnn": {
+                "learning_rate": 0.001, "batch_size": 4, "num_epochs": 2,
+                "dropout": 0.3, "activation": "relu",
+            }},
+            "augmentation": {"enabled": False, "class_specific": {"enabled": False},
+                             "mixup": {"enabled": False}},
+            "checkpoint": {"save_every_n_epochs": 5, "save_best": True,
+                           "monitor_metric": "val_acc", "max_checkpoint_files": 5},
+            "data": {"class_names": ["A", "B", "C"], "num_classes": 3, "image_size": 48},
+            "seed": 42,
         }
 
     @pytest.fixture
     def dummy_loader(self):
         from torch.utils.data import DataLoader, TensorDataset
-        X = torch.randn(16, 1, 48, 48)
+        x = torch.randn(16, 1, 48, 48)
         y = torch.randint(0, 3, (16,))
-        return DataLoader(TensorDataset(X, y), batch_size=4)
+        return DataLoader(TensorDataset(x, y), batch_size=4)
 
-    # Helper: 构建测试用 Trainer 实例（减少重复代码）
-    def _make_trainer(self, dummy_config, dummy_loader, num_classes=3):
-        from training.trainer import Trainer
+    # Helper: 构建测试用 Trainer 实例（run 目录隔离到 tmp_path，不污染正式 runs/）
+    def _make_trainer(self, dummy_config, dummy_loader, tmp_path, num_classes=3):
         from models.mini_cnn import MiniCNN
+        from training.trainer import Trainer
         model = MiniCNN(num_classes=num_classes)
         return Trainer(
             model=model, train_loader=dummy_loader, val_loader=dummy_loader,
             test_loader=dummy_loader, config=dummy_config,
             model_name="mini_cnn", device=torch.device("cpu"),
+            run_dir=tmp_path / "trainer_run",
         )
 
-    def test_trainer_init(self, dummy_config, dummy_loader):
-        trainer = self._make_trainer(dummy_config, dummy_loader)
+    def test_trainer_init(self, dummy_config, dummy_loader, tmp_path):
+        trainer = self._make_trainer(dummy_config, dummy_loader, tmp_path)
         assert trainer.scheduler_num_epochs == 2
         assert trainer.use_amp is False
         assert trainer.grad_accum_steps == 1
         assert trainer.max_grad_norm == 1.0
 
-    def test_evaluate_returns_three_values(self, dummy_config, dummy_loader):
-        trainer = self._make_trainer(dummy_config, dummy_loader)
+    def test_evaluate_returns_three_values(self, dummy_config, dummy_loader, tmp_path):
+        trainer = self._make_trainer(dummy_config, dummy_loader, tmp_path)
         result = trainer.evaluate()
         assert len(result) == 3, f"evaluate 应返回三元组，得到 {len(result)} 项"
         val_loss, top1_acc, top5_acc = result
@@ -207,7 +217,7 @@ class TestTrainer:
         assert 0 <= top5_acc <= 1
 
     def test_save_and_load_checkpoint(self, dummy_config, dummy_loader, tmp_path):
-        trainer = self._make_trainer(dummy_config, dummy_loader)
+        trainer = self._make_trainer(dummy_config, dummy_loader, tmp_path)
         # 模拟 fit() 的行为：设置 _current_epoch 后训练 + 评估，追加 history
         trainer._current_epoch = 1
         train_loss, train_acc = trainer.train_one_epoch()
@@ -228,7 +238,7 @@ class TestTrainer:
         assert ckpt["epoch"] == 1
 
         # 新 Trainer 加载（start_epoch 应为 epoch + 1 = 2）
-        trainer2 = self._make_trainer(dummy_config, dummy_loader)
+        trainer2 = self._make_trainer(dummy_config, dummy_loader, tmp_path)
         trainer2.load_checkpoint(ckpt_path)
         assert trainer2.start_epoch == 2
         assert len(trainer2.history["val_acc"]) == 1
@@ -236,7 +246,7 @@ class TestTrainer:
     def test_load_checkpoint_wrong_model_raises(self, dummy_config, dummy_loader, tmp_path):
         """加载不匹配的模型名 checkpoint 应报错"""
         # 创建一个模型名不匹配的 checkpoint
-        trainer = self._make_trainer(dummy_config, dummy_loader)
+        trainer = self._make_trainer(dummy_config, dummy_loader, tmp_path)
         trainer._current_epoch = 1
         ckpt_path = tmp_path / "test.pth"
         trainer.save_checkpoint(ckpt_path)
@@ -247,7 +257,7 @@ class TestTrainer:
         torch.save(ckpt, ckpt_path)
 
         # 尝试加载 — 应抛出 RuntimeError
-        trainer2 = self._make_trainer(dummy_config, dummy_loader)
+        trainer2 = self._make_trainer(dummy_config, dummy_loader, tmp_path)
         with pytest.raises(RuntimeError, match="模型名不匹配"):
             trainer2.load_checkpoint(ckpt_path)
 
@@ -286,8 +296,8 @@ class TestCBFocalLoss:
 # ============================================================
 class TestMixUp:
     def test_mixup_data_shapes(self):
+
         from training.trainer import mixup_data
-        import numpy as np
         x = torch.randn(8, 1, 48, 48)
         y = torch.randint(0, 7, (8,))
         mixed_x, y_a, y_b, lam = mixup_data(x, y, alpha=0.2, device="cpu")

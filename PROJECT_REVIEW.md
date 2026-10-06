@@ -8,7 +8,7 @@
 
 项目已经覆盖数据分析、三个 CNN、训练、断点保存、类别不平衡处理、评估和推理演示，能够作为课程项目及入组申请的基础。当前最主要的障碍是：推理没有按训练配置构造模型，参数量表述错误，数据存在跨划分重复，实验产物不能完整追溯，早停与续训行为不可靠。修复后应以“完成并核验一个可复现的 FER2013 表情分类流程”介绍项目，明确自己的工作及结果限制。
 
-本文中的“验收标准”是各项修复需要满足的条件。本轮已完成 F20 的 Windows CUDA 环境检查并更新文档、证据和依赖快照；其余问题仍按各自状态列为待办，不修改应用代码，不启动正式训练。P0 表示正式重训前需要完成，P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成。
+本文中的“验收标准”是各项修复需要满足的条件。**2026-10-07 修复轮**：F01–F19 已完成代码修复、针对性验证与材料同步（状态见各项）；**未启动正式重训**（按用户决策，重训与比较实验另行安排）。P0 表示正式重训前需要完成（适用条件已全部满足），P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成。
 
 ## Windows CUDA 环境：已安装并验收
 
@@ -94,7 +94,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 用当前 MicroResNet GELU 权重验证应用加载后确实为 GELU，且与统一评估入口逐样本预测一致。不能用“接近 66.82%”代替加载一致性检查。
 - 对已有的非默认激活和 SE 配置做往返检查；缺失/非法规格或不兼容权重明确报错。应用显示可追溯的模型配置及权重哈希。
 
-**状态：** 已确认，待代码修复。
+**状态：** 已修复（2026-10-07）。新增 utils/model_spec.py：版本化 model_spec + 统一构造/加载入口，训练导出、离线评估、Notebook、应用全部接入；旧权重按确定性迁移规则解析（activation 读旧 config、use_se 由 state_dict 判定、缺失关键字段必须显式提供）。证据：往返 logits 逐位一致（非默认激活+SE）；MicroResNet 按 GELU 正确加载 PrivateTest 66.82%（默认 ReLU 为 62.36%、836/3589 预测变化，与评估轮一致）；应用与离线评估逐样本一致（tests/test_inference.py）。
 
 ### F02 · P0 · 参数量与效率表述错误
 
@@ -108,7 +108,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - README、应用、模型说明、报告和 PPT 不再出现旧数量；每个效率数值能追溯到运行配置。
 - 若报告 FLOPs，明确 MAC 与 FLOP 的换算；延迟至少记录预热、重复次数、median/P95，GPU 计时同步，并把预处理与模型前向耗时分开。未测的数据标为“未测”，不能据参数量推断速度。
 
-**状态：** 已确认，待代码和材料修复。
+**状态：** 已修复（2026-10-07）。参数量实测修正为 1,274,823 / 5,407,687 / 753,991（SE 版 764,663），同步到模型 docstring、README 与应用动态显示；新增 tools/benchmark_efficiency.py 实测 MACs（batch=1）、GPU/CPU 延迟（median/P95，预热 10 + 重复 100，同步计时，预处理与前向分开）、训练峰值显存，输出 analysis/efficiency_results.json；删除「每千参数贡献」表述。报告/PPT 本轮未同步（见 F19）。
 
 ### F03 · P0 · 跨划分重复及标签冲突未披露
 
@@ -122,7 +122,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 附加去重协议如实施，三对划分的像素哈希交集均为 0；57 个冲突组的处理规则明确，输出各划分及各类计数、原行号清单和校验值。重复执行得到相同清单。
 - 不用 PrivateTest accuracy 来选择清洗规则；不同协议的指标不混在同一排名中，不宣称人员互斥或近重复已全部排除。
 
-**状态：** 已确认；官方披露及附加协议设计待完成。
+**状态：** 已修复（官方披露路线，2026-10-07）。复算与评估轮一致：1516 重复组 / 1853 条超出 / 57 冲突组 / 280（PublicTest）/ 288（PrivateTest）/ 43+44（Public↔Private）；敏感性分析由保存预测复算（61.04%/63.95%/65.07%，Macro-F1 53.95%/60.30%/60.42%）。tools/data_audit.py 可复跑（输出 analysis/data_audit.json）；docs/data_audit.md 含披露与 dedup-v1 协议草案（未冻结、未实施）。去重重训未执行（按用户决策，重训整体暂缓）。
 
 ### F04 · P0 · 推荐安装方式失败，版本范围不一致
 
@@ -136,7 +136,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 模型、数据和训练模块可导入，训练 `--help` 正常，应用启动正常；不依赖评估过程中手动拼出的环境。
 - 声明的最低 Python/PyTorch 版本经过导入和关键接口检查；未支持版本给出明确错误，依赖文件不会“执行成功但没有安装任何依赖”。
 
-**状态：** 已复现安装失败，待修复。F20 的 CUDA 安装不代表此项通过。
+**状态：** 已修复（2026-10-07）。build-backend 改为 setuptools.build_meta；requires-python >=3.10；ruff/mypy 目标 py310；requirements.txt 为可执行安装入口（CUDA 组合 + -e ".[dev]"）。干净 Windows venv 全流程验证通过，过程中发现并记录关键前置条件——新 venv 的旧 pip 解析 CUDA 组合失败（typing-extensions 名称规范化问题），必须「先升级 pip」，已写入 README 与 requirements.txt。
 
 ### F05 · P0 · 多次运行的配置、日志与权重混合
 
@@ -150,7 +150,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 每个结果表和导出模型能反查唯一 run、完整配置、划分及权重 SHA-256；运行失败也保留启动配置和状态。
 - 选择旧权重演示时显示其真实来源；无完整历史配置的旧结果明确标注信息缺失。
 
-**状态：** 已确认，待修复。
+**状态：** 已修复（2026-10-07）。新增 training/runs/<模型>/<run_id>/ 目录结构（config_effective.yaml、run_meta.json 含 CLI/seed/git/环境/数据指纹、history.json、checkpoints/{last,best,epoch_*,interrupted_*}）；导出经 tools/export_model.py 写 export_manifest.json（run、SHA-256、spec、指标），默认不覆盖同名文件；旧目录整体保留为 legacy。证据：run 隔离测试（tests/test_training_pipeline.py）；短训练闭环（run 20261007_022921_seed42，训练→续训→导出→评估全程可追溯）。
 
 ### F06 · P0 · 类别计数错误，可能生成错误损失权重
 
@@ -164,7 +164,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 用小型、类别不均衡及缺失类别的固定数据验证计数、标签索引和权重；损失及梯度有限，不发生除零或类别错位。
 - 划分改变后重新统计，日志能核对采样器和 CB Focal 使用的计数完全一致。
 
-**状态：** 已确认，待修复。
+**状态：** 已修复（2026-10-07）。新增 compute_class_counts 按当前划分动态统计（官方 Training = [3995,436,4097,7215,4830,3171,4965]，合计 28,709）；采样器与 CB Focal Loss 共用同一份统计；零计数明确报错；错误常量 CLASS_COUNTS 已删除。证据：tests/test_training_pipeline.py（固定索引/越界/零计数）；训练日志与 run_meta 记录 class_counts。
 
 ### F07 · P1 · 不平衡策略同时开启，收益无法归因
 
@@ -178,7 +178,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 每项“提升某类表现”的结论对应只改变一个已有选项的可追溯对照；没有对照的组合只称当前设置。
 - 类别报告包括 PrivateTest Disgust 的 55 张支持数；说明一张样本对应约 1.82 个百分点 recall 变化。允许结果无改善，不能以挑选有利 seed 的方式验收。
 
-**状态：** 已确认缺少控制，待配置和实验整理。
+**状态：** 待重训（前置已就绪）。统一评估入口与比较协议草案 docs/comparison_protocol_draft.md 已完成（含 Focal/CB-Focal 预注册口径、只用 PublicTest 做选择、≥3 seeds、macro-F1 主指标）；比较方案冻结与 Focal/CB-Focal 重训按用户决策另行安排。
 
 ### F08 · P0 · 验证损失早停条件无法触发
 
@@ -192,7 +192,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 中间恢复到阈值以内时恶化计数清零；accuracy 平台在第 N 次连续无改善后停止，改善时清零，patience=0 的含义明确。
 - 保存/恢复后 best 和计数保持一致，同一后续指标序列在连续运行和恢复运行中触发于相同位置。
 
-**状态：** 行为探针已确认，待修复。
+**状态：** 已修复（2026-10-07）。val_loss 恶化判定改为「高于历史最小值的 threshold 倍」纯函数（update_val_loss_monitor），验收序列 [1.0,1.06,1.07,1.08] 第 4 个值触发、中间恢复清零；acc 早停计数独立；触发原因写入 run_meta.stop_reason；配置校验（threshold 必须 >1、patience ≥0、=0 禁用）。证据：tests/test_training_pipeline.py 序列测试。
 
 ### F09 · P0 · 续训状态不完整，确定性设置被覆盖
 
@@ -207,7 +207,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - epoch、history 长度和训练状态一致；中途文件明确为 partial，自动恢复选择最新完整 last，不意外退回最佳分数对应的旧 epoch。
 - 确定性开关在 Trainer 初始化与 fit 后仍有效；损坏/不兼容断点明确报错，保存失败不破坏上一份可用断点。
 
-**状态：** 已确认恢复缺陷，待修复。
+**状态：** 已修复（2026-10-07）。checkpoint 格式 v2：RNG（python/numpy/torch/cuda）、AMP scaler、best（值/epoch）、早停计数、累计训练时长全量保存与恢复；原子写（失败不破坏上一份断点）；中断断点标记 partial；旧格式断点明确拒绝（不静默降级）。证据：恢复与连续训练逐批次一致（批次顺序哈希、参数 atol=1e-6/rtol=1e-5、history/best/计数一致）；损坏/保存失败/中断用例；真实闭环 resume 验证（短训练 run 续训成功，累计用时恢复）。
 
 ### F10 · P0 · 最终评估依赖内存状态，缺失划分会静默用全数据
 
@@ -221,7 +221,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 同权重、同预处理、同环境下，统一入口、Notebook 和应用对同一批图像的类别预测完全一致。
 - best 不在 Trainer 内存时仍明确加载指定文件；换成不同权重后元数据和加载对象实际改变。指标可以从保存的预测与标签重新计算。
 
-**状态：** 已确认，待修复。
+**状态：** 已修复（2026-10-07）。新增统一评估入口 utils/evaluation.py + CLI：强制显式 checkpoint + split，与训练一致预处理，输出完整指标、逐样本行号/预测/概率、权重与划分哈希、ECE/NLL；缺失/非法 Usage 明确报错，无「全 CSV」回退。证据：三个 legacy 权重 6 组评估与评估轮数字四位小数一致；notebook 与应用已接入同一入口。
 
 ### F11 · P1 · 三模型比较条件不统一，只有单次结果
 
@@ -235,7 +235,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 表格有各次结果、均值/样本标准差、实际 epoch/更新步数/用时、训练方案和 run/权重标识；未完成的运行明确列出，不能静默排除。
 - 同表使用同一评估协议和指标；accuracy、Macro-F1 及类别结果联合讨论。排序可以改变、精度可以下降，验收要求实验可信，不要求超过某个分数。
 
-**状态：** 当前比较证据不足，待修复后重训。
+**状态：** 待重训（前置已就绪，同 F07）。3 模型 × 3 seeds 独立结果与统一比较待重训（按用户决策暂缓）；统一评估与比较协议草案已就绪。
 
 ### F12 · P1 · AMP 单步加速被推广为完整训练加速
 
@@ -249,7 +249,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 完整训练加速比由完整流程 OFF 时间 / ON 时间计算；小于 1 如实报告，不用 step 比值代替。
 - FP32/AMP 的 loss、梯度及更新有限，最终指标单独记录；基准运行前后正式权重和历史文件 SHA-256 不变。
 
-**状态：** 已确认原证据边界，待重做现有功能基准。F20 冒烟检查不验收加速比。
+**状态：** 已重做（2026-10-07）。tools/run_amp_comparison.py 重写为配对基准：同一初始权重、同一 RNG 起点、同一数据顺序、交替顺序、3 组配对、1 epoch + eval 完整流程；显存/有限性/批次顺序哈希记录；基准前后正式产物 SHA-256 校验。结果：完整流程加速 1.00x（mini）/1.10x（vgg）/1.00x（micro）；稳态 step 1.41x/1.65x/1.00x；峰值显存约 -30%～-45%；9 组配对批次顺序全部一致。结论已如实写入 README（旧「1.4–1.8x」说法废止，不做单步外推）。
 
 ### F13 · P0 · 配置不能可靠控制行为，Windows workers=0 存在兼容问题
 
@@ -263,7 +263,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - val_acc 选择最大值、val_loss 选择最小值；save_best=False 时不导出 best；augmentation.enabled=False 时普通与类别专属随机增强均关闭。
 - Windows 下 workers=0 与一个非零设置（例如 4）都能读取训练 batch；workers=0 不触发 persistent_workers/prefetch 参数错误，关闭后进程正常退出。
 
-**状态：** 已发现实现不一致，待逐项修复。
+**状态：** 已修复（2026-10-07）。新增 utils/config_validation.py 集中校验（未知键/非法值/仅 48×48/patience 语义/threshold>1/use_se 支持范围），启动前报错；checkpoint.save_best 与 monitor_metric 实际生效（val_loss 时按最小值保存）；workers=0 自动关闭 persistent/prefetch；类别特定增强受总开关控制；CLI 覆盖后统一校验并记录。证据：tests/test_config_validation.py（9 项）。
 
 ### F14 · P1 · 梯度累积尾部不足一组时被缩小
 
@@ -277,7 +277,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 完整组、尾组不足 K、累积=1 均执行正确次数的 step，重启训练前梯度清零；AMP 尾组更新有限。
 - 不把具有 BatchNorm 的 CNN 不同 batch 划分当作数学等价性测试；正式比较保持实际批次设置可追溯。
 
-**状态：** 条件性缺陷，待修复及针对性检查。
+**状态：** 已修复（2026-10-07）。梯度累积按组内实际样本数归一化（尾组不足一组不再缩小更新）；组末 unscale/裁剪/单次 step；诊断使用同一归一化；组开始清零梯度。证据：3+3+2 与单批 8 样本等价（数学级与 Trainer 级，atol=1e-6/rtol=1e-5）。
 
 ### F15 · P2 · 演示输入范围超出实际支持
 
@@ -291,7 +291,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 损坏文件不产生伪造结果或无提示崩溃；上传说明、README 和演示名称不承诺自动处理整张生活照或多张脸。
 - 对外表述为数据集表情类别预测，不把结果当作真实心理状态的测量。
 
-**状态：** 已确认范围限制，待应用说明和输入处理整理。
+**状态：** 已修复（2026-10-07）。应用限定「已裁剪的单张人脸」并写明输入要求；48×48 输入不重采样（与离线评估逐样本一致）；损坏/无法解码文件明确提示；README/应用文案不承诺整图或多脸处理。证据：tests/test_inference.py（预处理恒等 + 应用/评估一致）、tests/test_app.py（文案与启动）。
 
 ### F16 · P2 · Softmax 被表述为已验证的正确概率
 
@@ -305,7 +305,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - ECE/NLL 报告能够从保存概率与标签重算，概率有限、归一化正确，注明 15 区间及权重/划分。
 - 不以更改术语冒充已完成校准；未实施校准时，所有对外材料均保留“未校准”说明。
 
-**状态：** 已确认表达问题，待修复。
+**状态：** 已修复（2026-10-07）。界面与文档改为「模型概率（未校准）」并说明语义；ECE（15 等宽区间）/NLL 由统一评估的概率输出重算（PrivateTest：0.1123/0.2144/0.0645；NLL 1.0381/1.0538/0.9025），公式与口径记录于评估结果 JSON，可用保存预测复算。
 
 ### F17 · P2 · Grad-CAM 热图缺少行为验收，解释过强
 
@@ -319,7 +319,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 连续调用至少 10 次，hook 数量不增加，权重哈希与普通推理结果不被热图调用改变；模型的训练/eval 状态按约定恢复。
 - 界面和报告称辅助可视化，不把一张热图作为模型因果机制或心理解释的证据。
 
-**状态：** 基础检查通过，行为覆盖与文案待完善。
+**状态：** 已修复（2026-10-07）。Grad-CAM：hook 在 finally 中清理（异常安全）、调用后零梯度与训练状态恢复、目标类别越界报错、零响应定义为全 0；10 次连续调用 hook 数不变、参数不变。证据：tests/test_inference.py；界面表述为辅助可视化、不宣称因果解释。
 
 ### F18 · P1 · 质量工具与 CI 状态不能支撑质量承诺
 
@@ -333,7 +333,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - README badge 指向真实存在的工作流和仓库；若没有 CI，材料不宣称 CI 已通过。普通 CPU CI 不宣称已验证 CUDA 训练。
 - 测试前后原数据、正式日志和导出权重哈希不变；允许用临时小数据测试正确性，不把基础测试当作完整重训复现。
 
-**状态：** 已检查，质量流程待修复。
+**状态：** 已修复（2026-10-07）。补 data/training/inference 的 __init__.py 统一包边界后 mypy 真正运行（46 → 0 错误）；ruff 全绿（少量 per-file 忽略均有局部理由）；测试 75 项全部通过（核心 36 + 训练管线 18 + 推理 8 + 应用 4 + 配置校验 9）；README 移除失效 CI badge（保持无 CI，按用户决策），仓库链接统一；测试输出隔离于 tmp_path，不污染正式 runs。
 
 ### F19 · P2 · 对外材料有不可比或无证据表述，个人贡献不明确
 
@@ -347,7 +347,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 删除或严格限定上述不支持表述，不混用 PublicTest 与 PrivateTest，不宣称普通 CNN/残差/SE/Focal 是个人原创。
 - 有一份具体的个人贡献清单和可核查工作记录；一页摘要及短演示仅包含已完成成果、限制和当前修复状态。进入课题组不以单一分数作为保证。
 
-**状态：** 已确认材料问题，待同步；本轮只更新本评估文档。
+**状态：** 部分完成（2026-10-07，按用户决策调整范围）。README 全面重写：参数量/指标口径与 split 统一、数据重叠披露、未校准说明、安装与 runs/导出流程、无 CI 表述；模型 docstring 与 data/README 同步。课程报告 DOCX / PPT 本轮不修改（用户决策）；个人贡献清单未单独成文。
 
 ### F20 · P0 · 后续 GPU 训练需要可验证的 Windows CUDA 环境
 
@@ -366,13 +366,13 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 
 ## 修复顺序和正式重训的进入条件
 
-| 阶段 | 执行内容 | 阶段完成条件 |
+| 阶段 | 执行内容 | 阶段状态（2026-10-07 修复轮后） |
 |---|---|---|
-| 1 · 环境 | F20 CUDA、F04 安装入口 | F20 已验收；F04 构建后端与干净环境安装入口仍待修复 |
-| 2 · 正确性 | F01、F05、F06、F08、F09、F10、F13；使用累积时完成 F14 | 加载/配置/早停/续训/评估关键回归通过，独立 run 不混用旧产物 |
-| 3 · 数据与口径 | F02、F03，冻结 F07/F11 比较方案 | 参数修正，官方协议披露或附加去重协议明确，训练设置与 seed 提前固定 |
-| 4 · 当前模型重训 | 现有三模型；按需要验证既有不平衡选项与 AMP（F07/F11/F12） | 全部运行可追溯，完整结果和波动如实报告；不要求预设提升 |
-| 5 · 材料提交 | F15–F19 | 演示范围准确、材料数字一致、个人贡献明确、待办与成果分开 |
+| 1 · 环境 | F20 CUDA、F04 安装入口 | F20 已验收；F04 已修复（干净 venv 安装验证通过，含「先升级 pip」前置条件） |
+| 2 · 正确性 | F01、F05、F06、F08、F09、F10、F13；F14 | 已全部修复；关键回归（75 项测试）通过，run 完全隔离 |
+| 3 · 数据与口径 | F02、F03，冻结 F07/F11 比较方案 | F02/F03 已修复（披露完成、dedup-v1 草案未实施）；F07/F11 比较协议草案已备，待冻结后重训 |
+| 4 · 当前模型重训 | 现有三模型；按需要验证既有不平衡选项与 AMP（F07/F11/F12） | **未执行（按用户决策暂缓）**；F12 速度基准已重做 |
+| 5 · 材料提交 | F15–F19 | F15–F18 已修复；F19 代码侧材料完成，报告/PPT 未同步（用户决策） |
 
 正式重训前至少完成全部 P0 的适用条件。F03 的官方结果披露与附加去重结果分别验收，不能把“计划去重”写成“已消除泄漏”。F14 默认 K=1 不阻止这一配置重训，但启用 K>1 前必须通过尾组检查。GPU 已装好也不能替代模型加载、run 隔离或续训修复。
 
@@ -386,5 +386,26 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 
 本次不恢复工作区已有的 `.github/workflows/ci.yml` 与 `emotion_recognition.code-workspace` 删除，不修改原数据、旧日志、正式权重或既有 Notebook/报告。
 
+---
 
+## 修复轮（2026-10-07）交付与证据
 
+- **代码**：utils/model_spec.py、utils/evaluation.py、utils/config_validation.py；
+  training/{trainer, checkpoint, train.py} 重构；inference/{infer_utils, app}.py；
+  data/dataloader.py；tools/{export_model, evaluate_checkpoint, data_audit,
+  benchmark_efficiency, run_amp_comparison}.py。
+- **测试与质量**：75 项测试全部通过（tests/：核心 36 / 训练管线 18 / 推理 8 /
+  应用 4 / 配置校验 9）；Ruff 全绿；mypy 全绿（修复模块映射后 46 → 0）；
+  测试输出隔离（tmp_path），不污染正式 runs。
+- **文档**：README.md（全面重写）；docs/data_audit.md（数据披露 + dedup-v1 草案）；
+  docs/comparison_protocol_draft.md（F07/F11 比较协议草案）。
+- **实测产物**：analysis/evaluations/（legacy 权重 6 组 + 流程验证 1 组）、
+  analysis/data_audit.json、analysis/efficiency_results.json、
+  analysis/benchmark_amp/results.json。
+- **环境**：干净 Windows venv 全流程安装验证通过（torch 2.14.1+cu130、CUDA 可用、
+  pip check；发现并记录「先升级 pip」前置条件）；短训练闭环验证完成
+  （mini_cnn run 20261007_022921_seed42：1+1 epoch 训练 → `--resume auto` 续训 →
+  导出（export_manifest 记录）→ 统一评估；评估 acc=0.3463 与训练记录一致）。
+- **明确未做**（按用户决策或依赖重训）：3 模型 × 3 seeds 正式重训；
+  Focal/CB-Focal 比较（协议草案待冻结）；dedup-v1 实施与去重重训；
+  课程报告 DOCX / PPT 同步；CI 恢复（保持无 CI）。

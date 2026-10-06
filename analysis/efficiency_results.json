@@ -1,0 +1,174 @@
+{
+  "generated_at": "2026-10-07T02:16:38.217706",
+  "environment": {
+    "torch": "2.14.1+cu130",
+    "cuda_runtime": "13.0",
+    "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "platform": "win32",
+    "torch_threads": 16
+  },
+  "method": {
+    "input": "1×1×48×48 float32（灰度，x/255，无增强）",
+    "warmup": 10,
+    "repeat": 100,
+    "timer": "time.perf_counter；GPU 前后 torch.cuda.synchronize()",
+    "macs": "torch.utils.flop_counter；FLOPs = 2 × MACs；batch=1",
+    "vram": "随机张量训练 5 步，torch.cuda.max_memory_allocated（不含数据加载）",
+    "notes": "随机初始化权重；结果仅在本环境有效"
+  },
+  "models": {
+    "mini_cnn": {
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "params_total": 1274823,
+      "params_trainable": 1274823,
+      "latency": {
+        "cuda": {
+          "median_ms": 0.42515000131970737,
+          "p95_ms": 0.5154000009497395,
+          "min_ms": 0.3754999997909181,
+          "warmup": 10,
+          "repeat": 100
+        },
+        "cpu": {
+          "median_ms": 0.5173999998078216,
+          "p95_ms": 0.6310999997367617,
+          "min_ms": 0.47759999870322645,
+          "warmup": 10,
+          "repeat": 100
+        }
+      },
+      "preprocess_cpu": {
+        "median_ms": 0.012800001059076749,
+        "p95_ms": 0.01359999987471383,
+        "warmup": 10,
+        "repeat": 100
+      },
+      "macs_batch1": 23078656,
+      "flops_batch1": 46157312,
+      "train_peak_vram_mb": 457.73095703125,
+      "train_vram_batch_size": 256
+    },
+    "vgg_lite": {
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "vgg_lite",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.5,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "params_total": 5407687,
+      "params_trainable": 5407687,
+      "latency": {
+        "cuda": {
+          "median_ms": 0.7591499988848227,
+          "p95_ms": 0.8921999997255625,
+          "min_ms": 0.6973999988986179,
+          "warmup": 10,
+          "repeat": 100
+        },
+        "cpu": {
+          "median_ms": 1.9990999999208725,
+          "p95_ms": 2.260299999761628,
+          "min_ms": 1.6775999993114965,
+          "warmup": 10,
+          "repeat": 100
+        }
+      },
+      "preprocess_cpu": {
+        "median_ms": 0.018100001398124732,
+        "p95_ms": 0.018599999748403206,
+        "warmup": 10,
+        "repeat": 100
+      },
+      "macs_batch1": 260982528,
+      "flops_batch1": 521965056,
+      "train_peak_vram_mb": 731.5126953125,
+      "train_vram_batch_size": 128
+    },
+    "micro_resnet": {
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "params_total": 753991,
+      "params_trainable": 753991,
+      "latency": {
+        "cuda": {
+          "median_ms": 1.4848000000711181,
+          "p95_ms": 1.7601999988983152,
+          "min_ms": 1.355399999738438,
+          "warmup": 10,
+          "repeat": 100
+        },
+        "cpu": {
+          "median_ms": 1.4741499999217922,
+          "p95_ms": 1.5583999993395992,
+          "min_ms": 1.4217999996617436,
+          "warmup": 10,
+          "repeat": 100
+        }
+      },
+      "preprocess_cpu": {
+        "median_ms": 0.018400000044493936,
+        "p95_ms": 0.01920000067912042,
+        "warmup": 10,
+        "repeat": 100
+      },
+      "macs_batch1": 47334272,
+      "flops_batch1": 94668544,
+      "train_peak_vram_mb": 490.1103515625,
+      "train_vram_batch_size": 128
+    }
+  }
+}

@@ -1,13 +1,14 @@
 """
 MiniCNN - 基线模型
-3层卷积 + 全连接，参数量约 50K
-适用于：快速验证数据pipeline、作为性能下限参考
+3 层卷积 + 全连接，参数量 1,274,823（约 1.27M，七分类配置，实测）
+适用于：快速验证数据 pipeline、作为性能下限参考
 输入：1 x 48 x 48 灰度图
-输出：7 类情感
+输出：7 类表情
 """
 
 import torch
 import torch.nn as nn
+
 from utils.activations import get_activation
 
 

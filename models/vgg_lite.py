@@ -1,13 +1,14 @@
 """
-VGGLite - VGG变体
-5层卷积（2-2-1分组）+ 全连接，参数量约 1.5M
+VGGLite - VGG 变体
+5 层卷积（2-2-1 分组）+ 全连接，参数量 5,407,687（约 5.41M，七分类配置，实测）
 核心理念：小卷积核堆叠替代大卷积核，增加非线性表达能力
 输入：1 x 48 x 48 灰度图
-输出：7 类情感
+输出：7 类表情
 """
 
 import torch
 import torch.nn as nn
+
 from utils.activations import get_activation
 
 

@@ -1,7 +1,10 @@
 """
 FER2013 模型训练 CLI
-替代 Jupyter Notebook 训练 Cell，支持命令行参数驱动训练。
-保留 Notebook 仅做评估/可视化。
+
+- 每次运行创建独立 run 目录：training/runs/<模型>/<run_id>/
+- last.pth 为最新完整 epoch（--resume auto 自动选择）
+- 启动前集中校验配置（非法值/未知键明确报错）
+- 完成后用 tools/export_model.py 显式导出到推理目录
 
 用法:
     python training/train.py --model micro_resnet --epochs 30
@@ -9,8 +12,8 @@ FER2013 模型训练 CLI
     python training/train.py --model vgg_lite --epochs 10 --resume auto
     python training/train.py --model micro_resnet --diagnose --steps 5
 """
-import sys
 import argparse
+import sys
 import time
 from pathlib import Path
 
@@ -19,21 +22,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from training.trainer import (
-    load_config, set_seed, Trainer,
-)
+import torch
+
 from data.dataloader import create_dataloaders
 from training.checkpoint import find_resume_checkpoint
-from models.mini_cnn import MiniCNN
-from models.vgg_lite import VGGLite
-from models.micro_resnet import MicroResNet
-
-
-MODEL_REGISTRY = {
-    "mini_cnn": MiniCNN,
-    "vgg_lite": VGGLite,
-    "micro_resnet": MicroResNet,
-}
+from training.trainer import Trainer, load_config, set_seed
+from utils.config_validation import validate_config
+from utils.model_spec import build_model_from_spec, make_spec_from_config
 
 
 def parse_args():
@@ -49,48 +44,24 @@ def parse_args():
     )
     parser.add_argument(
         "--model", type=str, default="micro_resnet",
-        choices=list(MODEL_REGISTRY.keys()),
+        choices=["mini_cnn", "vgg_lite", "micro_resnet"],
         help="模型名称 (默认: micro_resnet)",
     )
-    parser.add_argument(
-        "--epochs", type=int, default=30,
-        help="本次训练轮数 (默认: 30)",
-    )
-    parser.add_argument(
-        "--amp", action="store_true", default=None,
-        help="启用 AMP 混合精度训练（覆盖 config 中的 amp 设置）",
-    )
-    parser.add_argument(
-        "--no-amp", action="store_true", default=None,
-        help="禁用 AMP（覆盖 config 中的 amp 设置）",
-    )
+    parser.add_argument("--epochs", type=int, default=30, help="本次训练轮数 (默认: 30)")
+    parser.add_argument("--amp", action="store_true", default=None,
+                        help="启用 AMP 混合精度训练（覆盖 config 中的 amp 设置）")
+    parser.add_argument("--no-amp", action="store_true", default=None,
+                        help="禁用 AMP（覆盖 config 中的 amp 设置）")
     parser.add_argument(
         "--resume", type=str, nargs="?", const="auto", default=None,
-        help=(
-            "恢复训练。可指定 checkpoint 路径，或 'auto' 自动选择最佳 checkpoint。"
-            "不指定则从头训练。"
-        ),
+        help=("恢复训练：'auto' 自动选择最新 run 的 last.pth，或指定断点路径。"
+              "不指定则从头训练（创建新 run）"),
     )
-    parser.add_argument(
-        "--diagnose", action="store_true",
-        help="仅运行性能诊断（不训练）",
-    )
-    parser.add_argument(
-        "--steps", type=int, default=10,
-        help="诊断步数 (默认: 10，含 3 步预热)",
-    )
-    parser.add_argument(
-        "--seed", type=int, default=None,
-        help="随机种子（覆盖 config 中的 seed）",
-    )
-    parser.add_argument(
-        "--lr", type=float, default=None,
-        help="学习率覆盖",
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=None,
-        help="Batch size 覆盖",
-    )
+    parser.add_argument("--diagnose", action="store_true", help="仅运行性能诊断（不训练）")
+    parser.add_argument("--steps", type=int, default=10, help="诊断步数 (默认: 10，含 3 步预热)")
+    parser.add_argument("--seed", type=int, default=None, help="随机种子（覆盖 config 中的 seed）")
+    parser.add_argument("--lr", type=float, default=None, help="学习率覆盖")
+    parser.add_argument("--batch-size", type=int, default=None, help="Batch size 覆盖")
     return parser.parse_args()
 
 
@@ -98,52 +69,69 @@ def main():
     args = parse_args()
     model_name = args.model
 
-    # 加载配置
     config = load_config()
-    seed = args.seed if args.seed is not None else config["seed"]
-    set_seed(seed)
 
-    # AMP 覆盖
-    if args.amp is True:
+    # ---- CLI 覆盖（应用后再集中校验，保证日志与"实际生效配置"一致）----
+    if args.amp and args.no_amp:
+        raise SystemExit("错误: --amp 与 --no-amp 不能同时使用")
+    if args.amp:
         config["training"]["amp"] = True
-    elif args.no_amp is True:
+    elif args.no_amp:
         config["training"]["amp"] = False
-
-    # lr/batch_size 覆盖
+    if args.seed is not None:
+        config["seed"] = args.seed
     if args.lr is not None:
         config["models"][model_name]["learning_rate"] = args.lr
     if args.batch_size is not None:
         config["models"][model_name]["batch_size"] = args.batch_size
 
-    import torch
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # ---- 启动前集中校验（F13）----
+    validate_config(config, model_name=model_name)
 
+    seed = config["seed"]
+    deterministic = bool(config["training"].get("cudnn_deterministic", False))
+    set_seed(seed, deterministic=deterministic)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_config = config["models"][model_name]
     activation = model_config.get("activation", config["training"]["activation"])
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"FER2013 训练 | 模型: {model_name} | 设备: {device}")
-    print(f"  AMP: {config['training']['amp']} | 激活: {activation}")
+    print(f"  AMP: {config['training']['amp']} | 激活: {activation} | "
+          f"cudnn_deterministic: {deterministic}")
     print(f"  LR: {model_config.get('learning_rate', '?')} | "
           f"Batch: {model_config.get('batch_size', '?')}")
     print(f"  种子: {seed}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
-    # 创建 DataLoaders
+    # ---- 数据 ----
     train_loader, val_loader, test_loader, _ = create_dataloaders(config, model_name)
     print(f"  训练集: {len(train_loader.dataset)} | "
           f"验证集: {len(val_loader.dataset)} | "
           f"测试集: {len(test_loader.dataset)}")
 
-    # 构建模型
-    ModelClass = MODEL_REGISTRY[model_name]
-    model = ModelClass(
-        num_classes=config["data"]["num_classes"],
-        dropout=model_config.get("dropout", 0.3),
-        activation=activation,
-    )
+    # ---- 模型（统一构造入口 F01）----
+    spec = make_spec_from_config(config, model_name)
+    model = build_model_from_spec(spec)
 
-    # 构建训练器
+    # ---- 恢复解析 ----
+    resume_path = None
+    if args.resume:
+        if args.resume == "auto":
+            resume_path = find_resume_checkpoint(model_name)
+            if resume_path is None:
+                print("  auto: 未找到可续训断点（training/runs/ 下无 last.pth），从头训练")
+            else:
+                print(f"  auto: 选择 {resume_path}")
+        else:
+            resume_path = Path(args.resume)
+            if not resume_path.exists():
+                raise SystemExit(f"错误: checkpoint 不存在: {resume_path}")
+
+    # 续训时沿用原 run 目录；新训练由 Trainer 生成新 run_id
+    run_dir = resume_path.parent.parent if resume_path is not None else None
+
     trainer = Trainer(
         model=model,
         train_loader=train_loader,
@@ -152,51 +140,40 @@ def main():
         config=config,
         model_name=model_name,
         device=device,
+        class_counts=train_loader.dataset.class_counts,
+        run_dir=run_dir,
+        run_meta_extra={"cli_args": vars(args)},
     )
 
     print(f"  参数量: {trainer.total_params:,}\n")
 
-    # 恢复训练
-    resume_path = None
-    if args.resume:
-        if args.resume == "auto":
-            resume_path = find_resume_checkpoint(model_name, prefer="best")
-            if resume_path is None:
-                print("  auto: 未找到可用 checkpoint，从头训练")
-            else:
-                print(f"  auto: 选择 {resume_path.name}")
-        else:
-            resume_path = Path(args.resume)
-            if not resume_path.exists():
-                print(f"  checkpoint 不存在: {resume_path}，从头训练")
-                resume_path = None
-
     if resume_path is not None:
         trainer.load_checkpoint(resume_path)
 
-    # 诊断模式
+    # ---- 诊断模式 ----
     if args.diagnose:
         print(f"\n  诊断模式: {args.steps} 步（含 3 步预热）\n")
-        timings = trainer.diagnose(num_steps=max(args.steps - 3, 5))
+        trainer.diagnose(num_steps=max(args.steps - 3, 5))
+        trainer._persist_run_meta(status="diagnose_completed")
         return
 
-    # 训练
+    # ---- 训练 ----
     fit_start = time.time()
     history = trainer.fit(args.epochs)
     total = time.time() - fit_start
 
-    # 输出摘要
     if history and history["val_acc"]:
-        best_epoch = max(range(len(history["val_acc"])),
-                        key=lambda i: history["val_acc"][i])
-        print(f"\n{'='*60}")
-        print(f"训练完成")
-        print(f"  最佳 val_acc: {history['val_acc'][best_epoch]:.4f} "
-              f"(第 {best_epoch + 1} 轮)")
+        best_epoch = max(range(len(history["val_acc"])), key=lambda i: history["val_acc"][i])
+        print(f"\n{'=' * 60}")
+        print("训练完成")
+        print(f"  最佳 val_acc: {history['val_acc'][best_epoch]:.4f} (第 {best_epoch + 1} 轮)")
         print(f"  总用时: {total:.1f}s")
-        print(f"  日志: {trainer.log_dir / 'history.json'}")
-        print(f"  最优模型: {trainer.save_dir / 'global_best.pth'}")
-        print(f"{'='*60}\n")
+        print(f"  Run 目录: {trainer.run_dir}")
+        print(f"  日志: {trainer.run_dir / 'history.json'}")
+        if trainer.save_best:
+            print(f"  最优模型: {trainer.checkpoints_dir / 'best.pth'}")
+        print("  提示: 导出到推理目录请运行  python tools/export_model.py --help")
+        print(f"{'=' * 60}\n")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,185 @@
+{
+  "exports": [
+    {
+      "file": "mini_cnn_best.pth",
+      "model_name": "mini_cnn",
+      "run_id": "legacy",
+      "legacy": true,
+      "format_version": null,
+      "source_checkpoint": "training\\checkpoints\\mini_cnn\\global_best.pth",
+      "source_sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",
+      "exported_sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",
+      "exported_at": "2026-10-07T02:13:47.755677",
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "legacy-migration",
+        "migration_notes": [
+          "activation 来自旧 checkpoint 的 config 字段",
+          "class_names 使用项目标准七类映射（与分类头输出维度一致）"
+        ]
+      },
+      "spec_notes": [
+        "activation 来自旧 checkpoint 的 config 字段",
+        "class_names 使用项目标准七类映射（与分类头输出维度一致）",
+        "该文件为历史导出的 legacy 旧产物（旧格式断点，配置信息不全）",
+        "与旧 training/checkpoints/mini_cnn/global_best.pth 的 SHA-256 一致"
+      ],
+      "metrics": {
+        "epoch": 107,
+        "val_acc": 0.6124268770217896,
+        "best_val_acc": 0.6124268770217896
+      }
+    },
+    {
+      "file": "vgg_lite_best.pth",
+      "model_name": "vgg_lite",
+      "run_id": "legacy",
+      "legacy": true,
+      "format_version": null,
+      "source_checkpoint": "training\\checkpoints\\vgg_lite\\global_best.pth",
+      "source_sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7",
+      "exported_sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7",
+      "exported_at": "2026-10-07T02:13:47.860884",
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "vgg_lite",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.5,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "legacy-migration",
+        "migration_notes": [
+          "activation 来自旧 checkpoint 的 config 字段",
+          "class_names 使用项目标准七类映射（与分类头输出维度一致）"
+        ]
+      },
+      "spec_notes": [
+        "activation 来自旧 checkpoint 的 config 字段",
+        "class_names 使用项目标准七类映射（与分类头输出维度一致）",
+        "该文件为历史导出的 legacy 旧产物（旧格式断点，配置信息不全）",
+        "与旧 training/checkpoints/vgg_lite/global_best.pth 的 SHA-256 一致"
+      ],
+      "metrics": {
+        "epoch": 109,
+        "val_acc": 0.6500418186187744,
+        "best_val_acc": 0.6500418186187744
+      }
+    },
+    {
+      "file": "micro_resnet_best.pth",
+      "model_name": "micro_resnet",
+      "run_id": "legacy",
+      "legacy": true,
+      "format_version": null,
+      "source_checkpoint": "training\\checkpoints\\micro_resnet\\global_best.pth",
+      "source_sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698",
+      "exported_sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698",
+      "exported_at": "2026-10-07T02:13:47.880189",
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "legacy-migration",
+        "migration_notes": [
+          "activation 来自旧 checkpoint 的 config 字段",
+          "use_se=False 由 state_dict 参数键判定（旧 config 未记录该字段）",
+          "class_names 使用项目标准七类映射（与分类头输出维度一致）"
+        ]
+      },
+      "spec_notes": [
+        "activation 来自旧 checkpoint 的 config 字段",
+        "use_se=False 由 state_dict 参数键判定（旧 config 未记录该字段）",
+        "class_names 使用项目标准七类映射（与分类头输出维度一致）",
+        "该文件为历史导出的 legacy 旧产物（旧格式断点，配置信息不全）",
+        "与旧 training/checkpoints/micro_resnet/global_best.pth 的 SHA-256 一致"
+      ],
+      "metrics": {
+        "epoch": 89,
+        "val_acc": 0.6731680631637573,
+        "best_val_acc": 0.6731680631637573
+      }
+    },
+    {
+      "file": "mini_cnn_20261007_022921_seed42.pth",
+      "model_name": "mini_cnn",
+      "run_id": "20261007_022921_seed42",
+      "legacy": false,
+      "format_version": 2,
+      "source_checkpoint": "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\best.pth",
+      "source_sha256": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb",
+      "exported_sha256": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb",
+      "exported_at": "2026-10-07T02:30:19.962214",
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "spec_notes": [
+        "model_spec v1（来源: training）"
+      ],
+      "metrics": {
+        "epoch": 2,
+        "val_acc": null,
+        "best_val_acc": 0.3463360369205475
+      }
+    }
+  ],
+  "updated_at": "2026-10-07T02:30:19.962214"
+}

@@ -1,13 +1,21 @@
 # FER2013 情感识别系统 — .gitignore
 
-# 训练 checkpoint (~626MB)
+# 训练 checkpoint (~626MB，历史产物)
 training/checkpoints/
 
-# 推理导出目录 (生成的 .pth 文件)
-inference/saved_models/
+# 新格式运行目录（每个 run 的断点较大，不纳入版本控制）
+training/runs/
+
+# 推理导出目录（生成的 .pth 文件；export_manifest.json 例外保留）
+inference/saved_models/*.pth
+
+# 开发/验证临时目录（验证完成后删除）
+.dev_tmp/
+.venv-clean/
 
 # Python 缓存
 __pycache__/
+*.egg-info/
 *.pyc
 *.pyo
 *.pyc

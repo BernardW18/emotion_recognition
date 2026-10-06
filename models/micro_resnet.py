@@ -1,13 +1,15 @@
 """
 MicroResNet - 微型残差网络
-4个残差块 + 全局平均池化，参数量约 400K
+4 个残差块 + 全局平均池化，参数量 753,991（约 754K，七分类配置，实测；
+启用 SE 时为 764,663）
 核心理念：残差连接解决梯度消失，全局平均池化减少参数
 输入：1 x 48 x 48 灰度图
-输出：7 类情感
+输出：7 类表情
 """
 
 import torch
 import torch.nn as nn
+
 from utils.activations import get_activation
 
 
@@ -31,7 +33,7 @@ class SEBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        scale = self.se(x).view(x.size(0), -1, 1, 1)
+        scale: torch.Tensor = self.se(x).view(x.size(0), -1, 1, 1)
         return x * scale
 
 
@@ -60,7 +62,7 @@ class ResidualBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
-        out = self.act(self.bn1(self.conv1(x)))
+        out: torch.Tensor = self.act(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         out = self.dropout(out)
         out += residual

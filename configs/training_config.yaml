@@ -60,9 +60,9 @@ training:
   #   优先级: 模型级 scheduler_t0 > 全局 scheduler_t0 > num_epochs 推导(max(num_epochs//3, 5))
   #   当前 30 配合 T_mult=2 → 周期 30/60/120/...（可注释此行以让 num_epochs 自动推导）
   scheduler_t0: 30
-  patience: 10                     # EarlyStopping 耐心值（val_acc 无改善轮数上限）
-  val_loss_patience: 15            # val_loss 持续上升耐心值（0 表示不启用）
-  val_loss_threshold: 1.05         # val_loss 触发倍率（1.05 = 上升超过 5% 即触发）
+  patience: 10                     # val_acc 早停：连续 N 轮无改善则停止；0 = 禁用
+  val_loss_patience: 15            # val_loss 恶化早停：连续 N 轮高于历史最优的 threshold 倍则停止；0 = 禁用
+  val_loss_threshold: 1.05         # val_loss 恶化倍率（必须 >1；1.05 = 高于历史最优 5% 视为恶化）
   loss_type: "focal"               # 损失函数: "focal" (标准 Focal) / "cb_focal" (Class-Balanced Focal)
   cb_focal_beta: 0.999             # CB Focal Loss 的 beta 参数（仅在 loss_type="cb_focal" 时生效）
   amp: true                       # 混合精度训练（GPU 自动启用，CPU 无效）
@@ -70,6 +70,7 @@ training:
   torch_compile_mode: "reduce-overhead"  # 编译模式: default / reduce-overhead / max-autotune
   gradient_accumulation_steps: 1  # 梯度累积步数（>1 时显存不足可用）
   max_grad_norm: 1.0              # 梯度裁剪阈值（0 表示不裁剪）
+  cudnn_deterministic: false      # cuDNN 确定性模式（true=严格可复现但明显变慢；由配置决定，初始化与 fit 不再强制覆盖）
 
 # 模型特定覆盖
 models:
@@ -89,10 +90,11 @@ models:
 
   micro_resnet:
     learning_rate: 0.0003
-    batch_size: 128               # ~400K 参数，独显直连可加大 batch
+    batch_size: 128               # ~400K 参数，独显直连可加大
     num_epochs: 90
     dropout: 0.3
-    activation: "gelu"            
+    activation: "gelu"
+    use_se: false                 # SE 通道注意力开关（显式配置，不依赖静默默认值）
 
 # 保存策略
 checkpoint:

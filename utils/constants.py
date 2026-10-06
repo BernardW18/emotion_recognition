@@ -11,7 +11,6 @@ __all__ = [
     "CLASS_EMOJIS",
     "EMOTION_COUNT",
     "EMOTION_ID_MAP",
-    "CLASS_COUNTS",
 ]
 
 CLASS_NAMES = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
@@ -21,9 +20,10 @@ EMOTION_COUNT = len(CLASS_NAMES)
 # 情感名称到索引的映射 (O(1) 查询)
 EMOTION_ID_MAP = {name: idx for idx, name in enumerate(CLASS_NAMES)}
 
-# FER2013 各类别训练集样本数（基于 CSV Usage=Training 统计）
-# 用于 CB Focal Loss 的 class_counts 参数
-CLASS_COUNTS = [4953, 436, 5121, 8989, 6077, 4002, 6198]
+# 注意：类别计数不再硬编码。历史上此处曾保存一份与官方 Training 划分不符的
+# 固定计数（总和 35,776 ≠ 28,709），导致 CB Focal Loss 使用错误权重。
+# 训练时一律由 data.dataloader.compute_class_counts 按当前实际划分统计
+# （官方 Training 划分的七个计数为 [3995, 436, 4097, 7215, 4830, 3171, 4965]）。
 
 # 情感类别对应的 emoji（用于推理 UI 展示）
 CLASS_EMOJIS = {

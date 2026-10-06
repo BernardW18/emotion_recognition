@@ -1,60 +1,81 @@
 """
-共享训练模块 - 所有训练 Notebook 统一使用
-解决: P2-8(代码重复) P0-2(resume) P0-3(暂停保存) P1-6(RandomErasing) P2-9(路径) P2-11(tqdm)
+共享训练模块 — run 隔离 / 早停 / 完整续训 / 梯度累积修复（F05 / F08 / F09 / F13 / F14）
+
+与旧版的关键差异:
+  - 每次训练建立独立 run 目录: training/runs/<model_name>/<run_id>/
+    （内含 config_effective.yaml、run_meta.json、history.json、checkpoints/）
+  - last.pth = 最新完整 epoch 的完整状态（续训入口，每个 epoch 结束保存）
+  - best.pth 仅用于评估，受 checkpoint.save_best / monitor_metric 控制
+  - 早停（F08）: val_acc 连续无改善（training.patience 轮）；
+    或 val_loss 连续高于历史最小值的 threshold 倍（val_loss_patience 轮）。
+    中间恢复时计数清零；取值为 0 表示禁用该项。触发时记录原因。
+  - 续训（F09）: 恢复 RNG / AMP scaler / best / 早停计数 / 累计时长；
+    中断断点标记 partial=True（epoch 中途状态，不冒充精确续训）
+  - 梯度累积（F14）: 按组内实际样本数归一化，尾组不足一组时不缩小更新
+  - 确定性与性能模式（cudnn.deterministic / benchmark / matmul precision）
+    由配置决定；Trainer 初始化按配置应用一次，fit() 不再强制覆盖
+
+用法:
+    from training.trainer import Trainer
+    trainer = Trainer(model, train_loader, val_loader, test_loader, config, model_name)
+    trainer.fit(30)
 """
 
-import sys
-import json
-import copy
+__all__ = [
+    "load_config", "set_seed", "get_activation", "ACTIVATION_REGISTRY",
+    "build_optimizer", "build_scheduler",
+    "mixup_data", "mixup_criterion",
+    "compute_batch_sizes", "compute_group_totals", "update_val_loss_monitor",
+    "Trainer",
+]
+
 import logging
 import random
-import shutil
+import sys
 import time
-from pathlib import Path
+from collections.abc import Sized
 from datetime import datetime
+from pathlib import Path
+from typing import cast
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
 import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from utils.activations import get_activation, ACTIVATION_REGISTRY
 
-# ============================================================
-# 数据加载模块（Trainer 内部不使用，Notebook 应直接导入 data.dataloader）
-# 保留注释提示迁移方向；实际导入已在下方移除
-# ============================================================
-
-# ============================================================
-# Checkpoint 管理（仅内部使用，不重导出）
-# ============================================================
+from training.checkpoint import (
+    RUNS_ROOT,
+    _format_duration,
+    collect_environment_info,
+    collect_git_info,
+    read_run_meta,
+    write_json_atomic,
+    write_run_meta,
+)
+from training.checkpoint import (
+    cleanup_old_checkpoints as _cleanup_old_checkpoints,
+)
+from training.checkpoint import (
+    load_checkpoint as _load_checkpoint,
+)
+from training.checkpoint import (
+    load_checkpoint_metadata as _load_checkpoint_metadata,
+)
 from training.checkpoint import (
     save_checkpoint as _save_checkpoint,
-    load_checkpoint as _load_checkpoint,
-    load_checkpoint_metadata as _load_checkpoint_metadata,
-    cleanup_old_checkpoints as _cleanup_old_checkpoints,
-    _format_duration,
 )
-
-# ============================================================
-# 损失函数（Focal Loss 替代 CrossEntropy + class_weights）
-# ============================================================
-from utils.losses import FocalLoss, CBFocalLoss
+from utils.activations import ACTIVATION_REGISTRY, get_activation
+from utils.losses import CBFocalLoss, FocalLoss
+from utils.model_spec import count_parameters, make_spec_from_config
 
 # 日志
 logger = logging.getLogger("trainer")
 
-# 导出控制（不再重导出 data.dataloader 和 checkpoint 的符号）
-__all__ = [
-    "load_config", "set_seed", "get_activation", "ACTIVATION_REGISTRY",
-    "build_optimizer", "build_scheduler",
-    "Trainer",
-]
-
 # ============================================================
-# 项目根目录（动态计算，解决 P2-9 脆弱路径问题）
+# 项目根目录（动态计算）
 # ============================================================
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -64,16 +85,19 @@ if str(PROJECT_ROOT) not in sys.path:
 # ============================================================
 # 配置加载
 # ============================================================
-def load_config(config_path: str = None) -> dict:
+def load_config(config_path: str | None = None) -> dict:
     """加载训练配置文件"""
     if config_path is None:
-        config_path = PROJECT_ROOT / "configs" / "training_config.yaml"
+        path = PROJECT_ROOT / "configs" / "training_config.yaml"
     else:
-        config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"配置文件未找到: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        path = Path(config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"配置文件未找到: {path}")
+    with open(path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    if not isinstance(config, dict):
+        raise ValueError(f"配置文件格式错误（应为 YAML 映射）: {path}")
+    return config
 
 
 # ============================================================
@@ -105,16 +129,7 @@ def set_seed(seed: int = 42, deterministic: bool = False):
 # 优化器工厂
 # ============================================================
 def build_optimizer(model: nn.Module, config: dict) -> optim.Optimizer:
-    """
-    根据配置构建优化器
-
-    Args:
-        model: 待优化的模型
-        config: 训练配置（training section）
-
-    Returns:
-        优化器实例
-    """
+    """根据配置构建优化器（config 为 training section 或合并后的配置）"""
     lr = config["learning_rate"]
     wd = config["weight_decay"]
     name = config.get("optimizer", "adam").lower()
@@ -133,20 +148,8 @@ def build_optimizer(model: nn.Module, config: dict) -> optim.Optimizer:
 # 学习率调度器工厂
 # ============================================================
 def build_scheduler(optimizer: optim.Optimizer, config: dict, num_epochs: int,
-                    model_config: dict = None):
-    """
-    根据配置构建学习率调度器
-
-    Args:
-        optimizer: 优化器实例
-        config: 训练配置（training section）
-        num_epochs: 总训练轮数（模型级 num_epochs，在 cosine 中用作 T_max，
-                    在 cosine_warm 中用于推导 T_0）
-        model_config: 模型特定配置（可选），用于模型级 scheduler_t0 覆盖
-
-    Returns:
-        调度器实例，若配置为 none 则返回 None
-    """
+                    model_config: dict | None = None):
+    """根据配置构建学习率调度器；none 返回 None"""
     name = config.get("scheduler", "none").lower()
 
     if name == "cosine":
@@ -159,7 +162,6 @@ def build_scheduler(optimizer: optim.Optimizer, config: dict, num_epochs: int,
         if t0 is None:
             t0 = config.get("scheduler_t0")
         if t0 is None:
-            # 未显式设置时，从 num_epochs 推导：使训练期间约经历 3 个余弦周期
             t0 = max(num_epochs // 3, 5)
         return optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer, T_0=t0, T_mult=2
@@ -181,17 +183,10 @@ def build_scheduler(optimizer: optim.Optimizer, config: dict, num_epochs: int,
 
 
 # ============================================================
-# Trainer 核心训练器
-# ============================================================
 # MixUp 工具函数
 # ============================================================
-def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 1.0, device: torch.device = None):
-    """
-    MixUp: 混合批内随机两张图像及其标签。
-
-    Returns:
-        mixed_x, y_a, y_b, lambda
-    """
+def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 1.0, device=None):
+    """MixUp: 混合批内随机两张图像及其标签。Returns: mixed_x, y_a, y_b, lambda"""
     if alpha <= 0:
         return x, y, y, torch.tensor(1.0)
     lam = np.random.beta(alpha, alpha)
@@ -202,23 +197,89 @@ def mixup_data(x: torch.Tensor, y: torch.Tensor, alpha: float = 1.0, device: tor
     return mixed_x, y_a, y_b, lam
 
 
-def mixup_criterion(criterion, pred: torch.Tensor, y_a: torch.Tensor, y_b: torch.Tensor, lam: float):
-    """
-    MixUp 损失: λ * CE(pred, y_a) + (1-λ) * CE(pred, y_b)
-    """
+def mixup_criterion(criterion, pred: torch.Tensor, y_a: torch.Tensor,
+                    y_b: torch.Tensor, lam: float):
+    """MixUp 损失: λ * CE(pred, y_a) + (1-λ) * CE(pred, y_b)"""
     return lam * criterion(pred, y_a) + (1 - lam) * criterion(pred, y_b)
 
 
 # ============================================================
+# 梯度累积辅助（F14）
+# ============================================================
+def compute_batch_sizes(loader: DataLoader) -> list[int]:
+    """
+    预计算 DataLoader 各 micro-batch 的样本数。
+
+    仅在最后一个 batch 不满时与 batch_size 不同；不支持 batch_sampler。
+    """
+    n = loader.batch_size
+    if n is None:
+        raise ValueError("梯度累积要求 DataLoader 使用普通 batch_size（不支持 batch_sampler）")
+    num_batches = len(loader)
+    if num_batches == 0:
+        return []
+    if getattr(loader, "drop_last", False):
+        return [n] * num_batches
+    total = len(cast(Sized, loader.dataset))
+    last = total - n * (num_batches - 1)
+    if last == n:
+        return [n] * num_batches
+    sizes = [n] * num_batches
+    sizes[-1] = int(last)
+    return sizes
+
+
+def compute_group_totals(sizes: list[int], grad_accum_steps: int) -> list[int]:
+    """
+    返回每个 micro-batch 所属累积组的实际总样本数。
+
+    组定义：每 grad_accum_steps 个连续 micro-batch 为一组（最后一组可为不足满员）。
+    归一化系数 = 本 micro 样本数 / 组总样本数 → 与「整组一次性求均值 loss」等价。
+    """
+    totals = []
+    for start in range(0, len(sizes), grad_accum_steps):
+        end = min(start + grad_accum_steps, len(sizes))
+        group_total = sum(sizes[start:end])
+        totals.extend([group_total] * (end - start))
+    return totals
+
+
+def update_val_loss_monitor(
+    hist_min_val_loss: float | None,
+    loss_worse_counter: int,
+    val_loss: float,
+    threshold: float,
+) -> tuple[float, int]:
+    """
+    val_loss 恶化监控（F08）。
+
+    - 更新历史最小 val_loss
+    - 当前 val_loss 高于「历史最小值 × threshold」时恶化计数 +1，否则清零（中间恢复清零）
+
+    Returns:
+        (新的 hist_min_val_loss, 新的 loss_worse_counter)
+    """
+    if hist_min_val_loss is None or val_loss < hist_min_val_loss:
+        hist_min_val_loss = val_loss
+    if hist_min_val_loss > 0 and val_loss > hist_min_val_loss * threshold:
+        loss_worse_counter += 1
+    else:
+        loss_worse_counter = 0
+    return hist_min_val_loss, loss_worse_counter
+
+
+# ============================================================
+# Trainer 核心训练器
+# ============================================================
 class Trainer:
     """
     统一训练器，集成:
-    - 断点恢复（P0-2）
-    - 暂停自动保存（P0-3）
-    - tqdm进度条（P2-11）
-    - Early stopping
-    - 最优模型 + 定期 checkpoint 保存
-    - 训练历史 JSON 记录
+    - run 隔离（独立 run 目录 + run_meta + history）
+    - 断点续训（RNG / scaler / best / 早停计数完整恢复）
+    - 暂停自动保存（partial 标记）
+    - Early stopping（val_acc + val_loss 双监控，独立开关）
+    - 最优模型保存（monitor_metric / save_best 由配置控制）
+    - 梯度累积（按组内实际样本数归一化）
     """
 
     def __init__(
@@ -229,9 +290,11 @@ class Trainer:
         test_loader: DataLoader,
         config: dict,
         model_name: str,
-        device: torch.device = None,
+        device: torch.device | None = None,
         focal_gamma: float = 2.0,
-        class_counts: list = None,
+        class_counts: list | None = None,
+        run_dir: str | Path | None = None,
+        run_meta_extra: dict | None = None,
     ):
         self.model = model.to(device)
         self.train_loader = train_loader
@@ -241,145 +304,247 @@ class Trainer:
         self.model_name = model_name
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # GPU 性能优化：开启 cudnn.benchmark（自动选择最优卷积算法）
-        # 注意：必须同时关闭 deterministic，否则 cuDNN 只在确定性算法间 benchmark，速度极慢
-        # set_seed() 可能已设置 deterministic=True，这里必须显式重置
-        if self.device.type == "cuda":
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cudnn.deterministic = False
-            # 允许 Tensor Core 加速 float32 矩阵乘法（FC 层受益显著）
-            # 'high' = 使用 Tensor Core，略微牺牲精度；'highest' = 禁用 Tensor Core（默认）
-            torch.set_float32_matmul_precision('high')
+        # ---- 模型规格（F01）：与 checkpoint / 推理共用同一来源 ----
+        self.model_spec = make_spec_from_config(config, model_name)
 
-        # torch.compile：编译模型以获得 kernel 融合和算子优化
-        # 需要检查 Triton 是否可用（Windows 原生不支持 Triton）
+        # ---- 确定性与性能模式：由配置决定（F09），fit 不再覆盖 ----
+        self.deterministic = bool(config["training"].get("cudnn_deterministic", False))
+        if self.device.type == "cuda":
+            torch.backends.cudnn.deterministic = self.deterministic
+            torch.backends.cudnn.benchmark = not self.deterministic
+            # deterministic=False 时允许 TF32（matmul_precision=high，Tensor Core 收益）
+            # deterministic=True 时使用 highest 保证严格一致的浮点行为
+            torch.set_float32_matmul_precision("highest" if self.deterministic else "high")
+
+        # ---- torch.compile（Windows 无 Triton 时自动跳过） ----
         self.use_compile = False
         if self.device.type == "cuda" and config["training"].get("torch_compile", False):
             try:
                 import triton  # noqa: F401
                 compile_mode = config["training"].get("torch_compile_mode", "reduce-overhead")
                 print(f"torch.compile({compile_mode}) 编译中...")
-                self.model = torch.compile(self.model, mode=compile_mode)
+                compiled = torch.compile(self.model, mode=compile_mode)
+                # torch.compile 返回 OptimizedModule（stub 未精确建模为 nn.Module）
+                self.model = compiled  # type: ignore[assignment]
                 self.use_compile = True
-                print("  ✅ torch.compile 启用")
+                print("  torch.compile 启用")
             except ImportError:
-                print("  ⚠️  torch.compile 跳过：Triton 未安装（Windows 原生不支持），使用 eager 模式")
+                print("  torch.compile 跳过：Triton 未安装（Windows 原生不支持），使用 eager 模式")
 
-        # 模型特定配置覆盖全局配置
+        # ---- 模型特定配置 ----
         self.model_config = config["models"].get(model_name, {})
-        # num_epochs 仅用于 CosineAnnealingLR 的 T_max，不限制训练轮数
         self.scheduler_num_epochs = self.model_config.get(
             "num_epochs", config["training"]["num_epochs"]
         )
+        # 早停（F08）：=0 表示禁用；触发条件在 fit 中检查
         self.patience = config["training"].get("patience", 7)
-        # val_loss 辅助监控配置（与 patience 整合，共享同一个 patience 计数器）
         self.val_loss_patience = config["training"].get("val_loss_patience", 0)
         self.val_loss_threshold = config["training"].get("val_loss_threshold", 1.05)
 
-        # MixUp 配置（batch 级别混合增强）
+        # MixUp
         self.mixup_enabled = config.get("augmentation", {}).get("mixup", {}).get("enabled", False)
         self.mixup_alpha = config.get("augmentation", {}).get("mixup", {}).get("alpha", 0.2)
 
-        # 损失函数：Focal Loss 或 CB Focal Loss（配置驱动）
-        # loss_type: "focal" / "cb_focal"
-        loss_type = config["training"].get("loss_type", "focal")
-        if loss_type == "cb_focal":
-            beta = config["training"].get("cb_focal_beta", 0.999)
-            from utils.constants import CLASS_COUNTS
-            self.criterion = CBFocalLoss(
-                gamma=focal_gamma, beta=beta,
-                class_counts=class_counts or CLASS_COUNTS,
+        # ---- 类别计数（F06）：采样器与 CB Focal Loss 必须同源 ----
+        ds_counts = getattr(train_loader.dataset, "class_counts", None)
+        if (
+            class_counts is not None and ds_counts is not None
+            and list(class_counts) != list(ds_counts)
+        ):
+            raise ValueError(
+                "传入的 class_counts 与 train_loader.dataset.class_counts 不一致："
+                f"{list(class_counts)} vs {list(ds_counts)}（采样器与损失必须使用同一份统计）"
             )
-            print(f"  loss: CBFocalLoss(gamma={focal_gamma}, beta={beta})")
+        resolved_counts = class_counts if class_counts is not None else ds_counts
+        self.class_counts = list(resolved_counts) if resolved_counts is not None else None
+
+        # ---- 损失函数 ----
+        loss_type = config["training"].get("loss_type", "focal")
+        self.criterion: nn.Module
+        if loss_type == "cb_focal":
+            if self.class_counts is None:
+                raise ValueError(
+                    "loss_type=cb_focal 需要 class_counts：请通过 create_dataloaders 构建训练集"
+                    "或显式传入（不再回退硬编码常量）"
+                )
+            beta = config["training"].get("cb_focal_beta", 0.999)
+            self.criterion = CBFocalLoss(
+                gamma=focal_gamma, beta=beta, class_counts=self.class_counts
+            )
+            print(
+                f"  loss: CBFocalLoss(gamma={focal_gamma}, beta={beta}) | "
+                f"class_counts={self.class_counts}"
+            )
         else:
             self.criterion = FocalLoss(gamma=focal_gamma)
+            if self.class_counts is not None:
+                print(
+                    f"  loss: FocalLoss(gamma={focal_gamma}) | "
+                    f"class_counts(采样器参考)={self.class_counts}"
+                )
 
-        # 优化器 & 调度器
-        # 合并全局训练配置和模型特定配置
+        # ---- 优化器 & 调度器 ----
         merged_training = dict(config["training"])
-        merged_training["learning_rate"] = self.model_config.get("learning_rate", config["training"]["learning_rate"])
+        merged_training["learning_rate"] = self.model_config.get(
+            "learning_rate", config["training"]["learning_rate"]
+        )
         self.optimizer = build_optimizer(self.model, merged_training)
         self.scheduler = build_scheduler(
             self.optimizer, config["training"], self.scheduler_num_epochs,
             model_config=self.model_config,
         )
 
-        # 目录
-        self.save_dir = PROJECT_ROOT / "training" / "checkpoints" / model_name
-        self.log_dir = PROJECT_ROOT / "training" / "logs" / model_name
-        self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        # ---- run 目录（F05）----
+        if run_dir is None:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = f"{stamp}_seed{config['seed']}"
+            run_dir = RUNS_ROOT / model_name / base
+            suffix = 1
+            while run_dir.exists():
+                suffix += 1
+                run_dir = RUNS_ROOT / model_name / f"{base}_{suffix}"
+        self.run_dir = Path(run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_id = self.run_dir.name
+        self.checkpoints_dir = self.run_dir / "checkpoints"
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
-        # 训练状态
+        # ---- best / 早停计数状态 ----
+        self.monitor_metric = config["checkpoint"].get("monitor_metric", "val_acc")
+        self.save_best = config["checkpoint"].get("save_best", True)
+        self.best_val_acc = 0.0            # 始终跟踪 val_acc 峰值（报告与 acc 早停用）
+        self.best_epoch = 0                # monitor 指标的峰值 epoch
+        self.best_monitor_value: float | None = None     # monitor 指标峰值
+        self.acc_patience_counter = 0
+        self.loss_worse_counter = 0
+        self.hist_min_val_loss: float | None = None
+
+        # ---- 训练状态 ----
         self.start_epoch = 1
-        self.history = {
+        self.history: dict[str, list[float]] = {
             "train_loss": [], "train_acc": [], "val_loss": [],
             "val_acc": [], "val_top5_acc": [], "lr": [],
         }
-        self.best_val_acc = 0.0       # 本轮训练峰值 val_acc
-        self.best_model_state = None   # 本轮训练峰值权重
-        self.global_best_val_acc = 0.0 # 跨会话全局最佳 val_acc
-        self.global_best_model_state = None  # 全局最佳权重
+        self.best_model_state = None  # 内存快照仅在 fit 会话内有效；权威 best 在 best.pth
 
-        # 即使从头训练，也要加载磁盘上已有的 global_best.pth 记录
-        # 防止新 session 的低精度覆盖之前跨会话的最高记录
-        global_best_path = self.save_dir / "global_best.pth"
-        if global_best_path.exists():
-            meta = _load_checkpoint_metadata(global_best_path)
-            if meta and meta["global_best_val_acc"] > 0:
-                self.global_best_val_acc = meta["global_best_val_acc"]
-                logger.info(
-                    "已从磁盘加载全局最佳记录: val_acc=%.4f (新 session 将与之比较)",
-                    self.global_best_val_acc,
-                )
+        # ---- 参数量 ----
+        self.total_params, self.trainable_params = count_parameters(
+            getattr(self.model, "_orig_mod", self.model)
+        )
 
-        # 统计参数量
-        self.total_params = sum(p.numel() for p in self.model.parameters())
-
-        # AMP 混合精度训练（GPU 自动启用）
+        # ---- AMP 混合精度（GPU 自动启用） ----
         use_amp = self.device.type == "cuda" and config["training"].get("amp", True)
         self.use_amp = use_amp
         self.scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
-        # 梯度累积步数
+        # ---- 梯度累积 / 裁剪 ----
         self.grad_accum_steps = config["training"].get("gradient_accumulation_steps", 1)
-
-        # 梯度裁剪阈值（0 表示不裁剪）
         self.max_grad_norm = config["training"].get("max_grad_norm", 0.0)
 
-        # 训练时间追踪（跨恢复会话累积）
-        self._accumulated_train_time = 0.0  # 之前会话累积的秒数
-        self._total_train_time = 0.0        # 当前总训练时间（累积 + 当前会话）
+        # ---- 训练时间追踪（跨恢复会话累积） ----
+        self._accumulated_train_time = 0.0
+        self._total_train_time = 0.0
 
+        # ---- run_meta（F05）：启动时记录 生效配置 / CLI / git / 环境 / 数据指纹 ----
+        existing_meta = read_run_meta(self.run_dir)
+        if existing_meta is None:
+            self.run_meta = self._build_run_meta(run_meta_extra)
+        else:
+            self.run_meta = existing_meta
+            self.run_meta.setdefault("resume_events", []).append({
+                "resumed_at": datetime.now().isoformat(),
+                "previous_status": existing_meta.get("status"),
+            })
+            self.run_meta["updated_at"] = datetime.now().isoformat()
+        self._persist_run_meta(status=self.run_meta.get("status", "initialized"))
+
+        # 生效配置落盘（若调用方尚未写入）
+        config_path = self.run_dir / "config_effective.yaml"
+        if not config_path.exists():
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
+
+    # ========================================================
+    # run 元数据
+    # ========================================================
+    def _build_run_meta(self, extra: dict | None) -> dict:
+        dataset = getattr(self.train_loader, "dataset", None)
+        split_fp = getattr(dataset, "split_fingerprint", None)
+        return {
+            "run_id": self.run_id,
+            "model_name": self.model_name,
+            "status": "initialized",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "seed": self.config["seed"],
+            "model_spec": self.model_spec.to_dict(),
+            "class_counts": self.class_counts,
+            "git": collect_git_info(),
+            "environment": collect_environment_info(),
+            "training_device": str(self.device),
+            "amp": self.use_amp,
+            "cudnn_deterministic": self.deterministic,
+            "torch_compile": self.use_compile,
+            "data": split_fp if split_fp is not None else {
+                "note": "split_fingerprint 未提供（train_loader 非 create_dataloaders 构建）"
+            },
+            "cli_args": (extra or {}).get("cli_args"),
+            "resume_events": [],
+        }
+
+    def _persist_run_meta(self, **updates) -> None:
+        self.run_meta.update(updates)
+        self.run_meta["updated_at"] = datetime.now().isoformat()
+        write_run_meta(self.run_dir, self.run_meta)
+
+    def _write_history(self) -> None:
+        write_json_atomic(self.run_dir / "history.json", self.history)
+
+    # ========================================================
+    # checkpoint 委托（training/checkpoint.py）
+    # ========================================================
+    def save_checkpoint(self, path, *, partial: bool = False, history: dict | None = None):
+        """保存完整训练状态（原子写入）"""
+        return _save_checkpoint(self, path, partial=partial, history=history)
+
+    def load_checkpoint(self, checkpoint_path) -> dict:
+        """从 checkpoint 恢复完整训练状态；恢复后清空梯度（不残留旧梯度）"""
+        ckpt = _load_checkpoint(self, checkpoint_path)
+        self.optimizer.zero_grad(set_to_none=True)
+        return ckpt
+
+    @staticmethod
+    def load_checkpoint_metadata(path: Path) -> dict | None:
+        """轻量读取 checkpoint 元数据"""
+        return _load_checkpoint_metadata(path)
+
+    def _cleanup_old_checkpoints(self):
+        """按配置清理最旧的定期断点"""
+        _cleanup_old_checkpoints(self.checkpoints_dir, self.config)
+
+    def _grad_scaler(self) -> torch.amp.GradScaler:
+        """AMP GradScaler（use_amp=True 时必存在；helper 用于类型收窄）"""
+        assert self.scaler is not None, "GradScaler 仅在 use_amp=True 时可用"
+        return self.scaler
+
+    # ========================================================
+    # 性能诊断
+    # ========================================================
     def diagnose(self, num_steps: int = 10) -> dict:
         """
-        性能诊断：逐步计时，定位训练瓶颈
+        性能诊断：逐步计时，定位训练瓶颈（含预热）。
 
-        测量以下阶段的耗时：
-        - data_load: DataLoader 取出一个 batch 的时间
-        - forward: 前向传播
-        - backward: 反向传播
-        - optimizer: 优化器更新 + zero_grad
-        - eval: 验证集完整评估
-
-        注意：此方法会执行真实训练步骤（含 forward + backward），会修改模型权重。
-        如需无损诊断，请在诊断后从 checkpoint 恢复权重。
-
-        Args:
-            num_steps: 采样步数（不含预热步），默认 10
-
-        Returns:
-            包含各阶段平均耗时(ms)的字典（已排除预热）
+        注意：会执行真实训练步骤（修改模型权重）；归一化与分组同正式训练逻辑
+        （梯度累积 K>1 时按组内实际样本数缩放），但为了测"单步"性能，
+        step 频率为每 micro-batch 一次，与正式训练的组末 step 不同。
         """
         import statistics
 
-        # 预热步数：cuDNN benchmark 首次运行会测试多种卷积算法，耗时数秒
-        # 预热后 cuDNN 会缓存最优算法，后续步骤反映真实稳态性能
         warmup_steps = 3
         total_steps = warmup_steps + num_steps
 
         print(f"\n{'=' * 50}")
-        print(f"🔍 性能诊断 | {warmup_steps} 步预热 + {num_steps} 步采样 | 设备: {self.device}")
+        print(f"性能诊断 | {warmup_steps} 步预热 + {num_steps} 步采样 | 设备: {self.device}")
         print(f"   AMP: {self.use_amp} | Compile: {self.use_compile}")
         print(f"   cudnn.benchmark: {torch.backends.cudnn.benchmark}")
         print(f"   cudnn.deterministic: {torch.backends.cudnn.deterministic}")
@@ -392,24 +557,37 @@ class Trainer:
             torch.cuda.reset_peak_memory_stats()
         print(f"{'=' * 50}")
 
-        warmup_timings = {"data_load": [], "forward": [], "backward": [], "optimizer": []}
-        timings = {"data_load": [], "forward": [], "backward": [], "optimizer": []}
+        sizes = compute_batch_sizes(self.train_loader)
+        group_totals = compute_group_totals(sizes, self.grad_accum_steps)
+
+        warmup_timings: dict[str, list[float]] = {
+            "data_load": [], "forward": [], "backward": [], "optimizer": [],
+        }
+        timings: dict[str, list[float]] = {
+            "data_load": [], "forward": [], "backward": [], "optimizer": [],
+        }
 
         self.model.train()
         data_iter = iter(self.train_loader)
+        self.optimizer.zero_grad(set_to_none=True)
 
         for step_idx in range(total_steps):
-            # 1. 数据加载
             torch.cuda.synchronize() if torch.cuda.is_available() else None
             t0 = time.perf_counter()
-            images, labels = next(data_iter)
+            try:
+                images, labels = next(data_iter)
+            except StopIteration:
+                data_iter = iter(self.train_loader)
+                images, labels = next(data_iter)
             if images.device != self.device:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
             torch.cuda.synchronize() if torch.cuda.is_available() else None
             t1 = time.perf_counter()
 
-            # 2. 前向传播
+            batch_size = images.size(0)
+            group_total = group_totals[step_idx % len(group_totals)] if group_totals else batch_size
+
             if self.use_amp:
                 with torch.amp.autocast("cuda"):
                     outputs = self.model(images)
@@ -420,23 +598,21 @@ class Trainer:
             torch.cuda.synchronize() if torch.cuda.is_available() else None
             t2 = time.perf_counter()
 
-            # 3. 反向传播
-            scaled_loss = loss / self.grad_accum_steps
+            scaled_loss = loss * batch_size / group_total
             if self.use_amp:
-                self.scaler.scale(scaled_loss).backward()
+                self._grad_scaler().scale(scaled_loss).backward()
             else:
                 scaled_loss.backward()
             torch.cuda.synchronize() if torch.cuda.is_available() else None
             t3 = time.perf_counter()
 
-            # 4. 优化器
             if self.max_grad_norm > 0:
                 if self.use_amp:
-                    self.scaler.unscale_(self.optimizer)
+                    self._grad_scaler().unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             if self.use_amp:
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+                self._grad_scaler().step(self.optimizer)
+                self._grad_scaler().update()
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
@@ -450,7 +626,6 @@ class Trainer:
                 "optimizer": (t4 - t3) * 1000,
             }
 
-            # 预热阶段不记录
             if step_idx < warmup_steps:
                 for k, v in phase_times.items():
                     warmup_timings[k].append(v)
@@ -460,10 +635,9 @@ class Trainer:
                 for k, v in phase_times.items():
                     timings[k].append(v)
 
-        # 统计（仅采样阶段）
         print(f"\n{'阶段':<15} {'平均(ms)':<12} {'最小(ms)':<12} {'最大(ms)':<12}")
         print(f"{'-' * 51}")
-        total_avg = 0
+        total_avg = 0.0
         for stage, values in timings.items():
             avg = statistics.mean(values)
             total_avg += avg
@@ -471,7 +645,6 @@ class Trainer:
             mx = max(values)
             print(f"{stage:<15} {avg:>10.2f}  {mn:>10.2f}  {mx:>10.2f}")
 
-        # 评估耗时
         torch.cuda.synchronize() if torch.cuda.is_available() else None
         eval_start = time.perf_counter()
         self.evaluate()
@@ -479,12 +652,13 @@ class Trainer:
         eval_time = (time.perf_counter() - eval_start) * 1000
         print(f"{'eval (全部)':<15} {eval_time:>10.2f}  {'':<12} {'':<12}")
 
-        # 预热对比
         if warmup_timings["forward"]:
             warmup_total = sum(statistics.mean(v) for v in warmup_timings.values())
-            print(f"\n   预热阶段平均: {warmup_total:.0f}ms/步 → 采样阶段平均: {total_avg:.0f}ms/步")
+            print(
+                f"\n   预热阶段平均: {warmup_total:.0f}ms/步 → "
+                f"采样阶段平均: {total_avg:.0f}ms/步"
+            )
 
-        # VRAM
         if torch.cuda.is_available():
             print(f"   VRAM: {torch.cuda.memory_allocated() / 1024**2:.0f}MB / "
                   f"{torch.cuda.max_memory_allocated() / 1024**2:.0f}MB peak")
@@ -494,24 +668,29 @@ class Trainer:
         print(f"{'单步总计':<15} {total_avg:>10.2f} ms")
         print(f"{'预估稳态速度':<15} ~{est_it_per_sec:.0f} it/s")
 
-        # 瓶颈诊断
-        print(f"\n💡 诊断建议:")
+        print("\n💡 诊断建议:")
         if torch.backends.cudnn.deterministic:
-            print(f"   ⚠️  cudnn.deterministic=True：强制使用慢速确定性算法，建议关闭")
+            print("   ⚠️  cudnn.deterministic=True：强制使用慢速确定性算法，建议在配置中关闭")
         max_stage = max(timings, key=lambda k: statistics.mean(timings[k]))
         max_pct = statistics.mean(timings[max_stage]) / total_avg * 100 if total_avg > 0 else 0
         if est_it_per_sec < 10:
-            print(f"   ⚠️  速度异常低（{est_it_per_sec:.0f} it/s），主要瓶颈: {max_stage} ({max_pct:.0f}%)")
+            print(
+                f"   ⚠️  速度异常低（{est_it_per_sec:.0f} it/s），"
+                f"主要瓶颈: {max_stage} ({max_pct:.0f}%)"
+            )
             if max_stage == "data_load":
-                print(f"       → 数据加载瓶颈，检查 num_workers 是否足够")
+                print("       → 数据加载瓶颈，检查 num_workers 是否足够")
             elif max_stage == "forward":
-                print(f"       → 前向瓶颈，检查模型大小")
+                print("       → 前向瓶颈，检查模型大小")
             elif max_stage == "backward":
-                print(f"       → 反向瓶颈，检查 AMP 是否正常工作")
+                print("       → 反向瓶颈，检查 AMP 是否正常工作")
         elif est_it_per_sec < 50:
-            print(f"   ⚡ 速度正常偏低（{est_it_per_sec:.0f} it/s），瓶颈: {max_stage} ({max_pct:.0f}%)")
+            print(
+                f"   ⚡ 速度正常偏低（{est_it_per_sec:.0f} it/s），"
+                f"瓶颈: {max_stage} ({max_pct:.0f}%)"
+            )
             if max_stage == "backward":
-                print(f"       → Windows WDDM 驱动有额外开销，属正常范围")
+                print("       → Windows WDDM 驱动有额外开销，属正常范围")
         else:
             print(f"   ✅ 速度正常（{est_it_per_sec:.0f} it/s）")
 
@@ -519,36 +698,31 @@ class Trainer:
 
         return {k: statistics.mean(v) for k, v in timings.items()}
 
-    def load_checkpoint(self, checkpoint_path: str) -> dict:
-        """从 checkpoint 恢复训练状态（委托给 checkpoint.py）"""
-        return _load_checkpoint(self, checkpoint_path)
-
-    @staticmethod
-    def load_checkpoint_metadata(path: Path) -> dict | None:
-        """轻量读取 checkpoint 元数据（委托给 checkpoint.py）"""
-        return _load_checkpoint_metadata(path)
-
-    def _cleanup_old_checkpoints(self):
-        """自动清理最旧的定期断点文件（委托给 checkpoint.py）"""
-        return _cleanup_old_checkpoints(self.save_dir, self.config)
-
-    def save_checkpoint(self, path: Path, is_best: bool = False, history: dict = None):
-        """保存完整训练状态（委托给 checkpoint.py）"""
-        return _save_checkpoint(self, path, is_best, history)
-
+    # ========================================================
+    # 训练一个 epoch（梯度累积按组内实际样本数归一化）
+    # ========================================================
     def train_one_epoch(self) -> tuple:
-        """训练一个epoch（含 AMP、梯度累积、梯度裁剪、tqdm 进度条）"""
+        """训练一个 epoch（含 AMP、梯度累积、梯度裁剪、tqdm 进度条）"""
         self.model.train()
-        running_loss = 0.0
-        correct = 0
+        running_loss = torch.zeros((), device=self.device)
+        correct = torch.zeros((), dtype=torch.long, device=self.device)
         total = 0
+
+        num_batches = len(self.train_loader)
+        sizes = compute_batch_sizes(self.train_loader)
+        group_totals = compute_group_totals(sizes, self.grad_accum_steps)
+        self.optimizer.zero_grad(set_to_none=True)
 
         pbar = tqdm(self.train_loader, desc=f"[Epoch {self._current_epoch}]", leave=False)
         for batch_idx, (images, labels) in enumerate(pbar):
-            # 数据可能已在 GPU（preload_to_gpu 模式），仅在需要时传输
             if images.device != self.device:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
+
+            batch_size = images.size(0)
+
+            # 组归一化系数：本 micro 样本数 / 组内实际总样本数（F14，尾组不缩小）
+            group_total = group_totals[batch_idx] if group_totals else batch_size
 
             # MixUp：混合批内图像（仅训练，不用于验证）
             if self.mixup_enabled:
@@ -556,7 +730,6 @@ class Trainer:
                     images, labels, alpha=self.mixup_alpha, device=self.device,
                 )
 
-            # AMP 自动混合精度
             if self.use_amp:
                 with torch.amp.autocast("cuda"):
                     outputs = self.model(images)
@@ -564,69 +737,63 @@ class Trainer:
                         loss = mixup_criterion(self.criterion, outputs, labels_a, labels_b, lam)
                     else:
                         loss = self.criterion(outputs, labels)
-                # 按梯度累积步数缩放 loss
-                scaled_loss = loss / self.grad_accum_steps
-                self.scaler.scale(scaled_loss).backward()
+                scaled_loss = loss * batch_size / group_total
+                self._grad_scaler().scale(scaled_loss).backward()
             else:
                 outputs = self.model(images)
                 if self.mixup_enabled:
                     loss = mixup_criterion(self.criterion, outputs, labels_a, labels_b, lam)
                 else:
                     loss = self.criterion(outputs, labels)
-                scaled_loss = loss / self.grad_accum_steps
+                scaled_loss = loss * batch_size / group_total
                 scaled_loss.backward()
 
-            # 梯度累积：每 accum_steps 步更新一次
-            if (batch_idx + 1) % self.grad_accum_steps == 0 or (batch_idx + 1) == len(self.train_loader):
-                # 梯度裁剪
+            # 组末更新：最后一组（可为不足 K 个 micro）在末尾 micro 后同样触发
+            group_start = (batch_idx // self.grad_accum_steps) * self.grad_accum_steps
+            group_end = min(group_start + self.grad_accum_steps, num_batches)
+            if (batch_idx + 1) == group_end:
                 if self.max_grad_norm > 0:
                     if self.use_amp:
-                        self.scaler.unscale_(self.optimizer)
+                        self._grad_scaler().unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
                 if self.use_amp:
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
+                    self._grad_scaler().step(self.optimizer)
+                    self._grad_scaler().update()
                 else:
                     self.optimizer.step()
 
-                # set_to_none=True 跳过梯度 memset，比填充 0 更快
                 self.optimizer.zero_grad(set_to_none=True)
 
-            # 统计（延迟 .item() 调用，减少 CUDA 同步）
-            # .float() 防止 AMP float16 累积溢出（float16 最大值 65504）
-            batch_size = images.size(0)
+            # 统计（延迟 .item() 调用；.float() 防 AMP 下 float16 累积溢出）
             running_loss += loss.detach().float() * batch_size
             if self.mixup_enabled:
-                # MixUp 下标签是混合的，无法计算 top-1 准确率
                 total += batch_size
-                correct = correct  # 保持原值，不累加
             else:
                 _, predicted = outputs.max(1)
                 total += batch_size
                 correct += predicted.eq(labels).sum()
 
-            # 每 10 步更新一次进度条（减少同步开销）
-            if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(self.train_loader):
+            if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == num_batches:
                 batch_loss = (running_loss / total).item()
                 if self.mixup_enabled:
-                    # MixUp 下标签为混合，无法计算准确率
                     pbar.set_postfix(loss=f"{batch_loss:.4f}")
                 else:
-                    pbar.set_postfix(loss=f"{batch_loss:.4f}", acc=f"{(correct / total).item():.4f}")
+                    pbar.set_postfix(
+                        loss=f"{batch_loss:.4f}", acc=f"{(correct / total).item():.4f}"
+                    )
 
         if self.mixup_enabled:
-            # MixUp 下不计算准确率，返回 0.0 占位
             return (running_loss / total).item(), 0.0
         return (running_loss / total).item(), (correct / total).item()
 
     @torch.no_grad()
-    def evaluate(self, loader: DataLoader = None) -> tuple:
+    def evaluate(self, loader: DataLoader | None = None) -> tuple:
         """
         评估模型
 
         Returns:
-            (val_loss, top1_acc, top5_acc) 三元组
+            (loss, top1_acc, top5_acc) 三元组
         """
         self.model.eval()
         running_loss = torch.tensor(0.0, device=self.device)
@@ -637,7 +804,6 @@ class Trainer:
         eval_loader = loader or self.val_loader
 
         for images, labels in eval_loader:
-            # 数据可能已在 GPU（preload_to_gpu 模式），仅在需要时传输
             if images.device != self.device:
                 images = images.to(self.device, non_blocking=True)
                 labels = labels.to(self.device, non_blocking=True)
@@ -653,7 +819,6 @@ class Trainer:
             batch_size = images.size(0)
             running_loss += loss.detach() * batch_size
 
-            # Top-1 和 Top-5 准确率（类别数不足 5 时取 min）
             _, predicted = outputs.max(1)
             top1_correct += predicted.eq(labels).sum()
 
@@ -668,20 +833,18 @@ class Trainer:
         top5_acc = (top5_correct / total).item()
         return (running_loss / total).item(), top1_acc, top5_acc
 
+    # ========================================================
+    # 主训练循环
+    # ========================================================
     def fit(self, additional_epochs: int = 0) -> dict:
         """
-        主训练循环（开放式，无 epoch 上限）
+        主训练循环（开放式，无 epoch 上限）。
 
-        Args:
-            additional_epochs: 本次会话要额外训练的轮数。
-                - 从头训练时默认 0 → 需要 notebook 显式传入（如 fit(30)）
-                - 从断点恢复时默认 0 → 需要显式传入（如 fit(10)）
-
-        - KeyboardInterrupt 捕获 + 自动保存（P0-3: 暂停保存）
-        - Early stopping
-        - Per-epoch 计时 & ETA 预估
+        - 早停（val_acc 无改善 / val_loss 恶化，独立开关，触发记录原因）
+        - 每个 epoch 结束保存 last.pth + history.json
+        - best.pth 受 checkpoint.save_best / monitor_metric 控制
+        - KeyboardInterrupt 保存 partial 断点；异常时 run_meta 标记 failed
         """
-        patience_counter = 0
         save_every = self.config["checkpoint"].get("save_every_n_epochs", 5)
 
         if additional_epochs <= 0:
@@ -697,13 +860,21 @@ class Trainer:
 
         print(f"\n{'=' * 60}")
         print(f"模型: {self.model_name} | 参数量: {self.total_params:,}")
+        print(f"Run: {self.run_id} | 目录: {self.run_dir}")
         print(f"设备: {self.device} | AMP: {self.use_amp} | Compile: {self.use_compile}")
         if self.device.type == "cuda":
             print(f"   matmul_precision: {torch.get_float32_matmul_precision()}")
+            print(f"   cudnn: benchmark={torch.backends.cudnn.benchmark} "
+                  f"deterministic={torch.backends.cudnn.deterministic}")
+        if self.class_counts is not None:
+            print(f"   class_counts(训练权重来源): {self.class_counts}")
 
         already_trained = self.start_epoch - 1
         if already_trained > 0:
-            print(f"权重已训练: {already_trained} 轮 | 本次续训: {additional_epochs} 轮 → 训练至第 {total_epochs} 轮")
+            print(
+                f"权重已训练: {already_trained} 轮 | "
+                f"本次续训: {additional_epochs} 轮 → 训练至第 {total_epochs} 轮"
+            )
             prev_dur = _format_duration(self._accumulated_train_time)
             if prev_dur:
                 print(f"之前累计用时: {prev_dur}")
@@ -713,22 +884,24 @@ class Trainer:
         print(f"{'=' * 60}\n")
 
         fit_start = time.time()
+        self._persist_run_meta(
+            status="running",
+            last_fit_started_at=datetime.now().isoformat(),
+            last_fit_requested_epochs=additional_epochs,
+            fit_start_epoch=self.start_epoch,
+        )
 
-        # 确保 cuDNN 使用最优性能设置（set_seed 可能在 Trainer 创建后再次调用）
-        if self.device.type == "cuda":
-            torch.backends.cudnn.benchmark = True
-            torch.backends.cudnn.deterministic = False
+        stop_reason = None
+        interrupted = False
 
         try:
             for epoch in range(self.start_epoch, self.start_epoch + additional_epochs):
                 self._current_epoch = epoch
-                session_epoch = epoch - self.start_epoch + 1  # 本轮第几轮
+                session_epoch = epoch - self.start_epoch + 1
                 epoch_start = time.time()
 
-                # 训练
+                # 训练 + 验证
                 train_loss, train_acc = self.train_one_epoch()
-
-                # 验证
                 val_loss, val_acc, val_top5 = self.evaluate()
                 current_lr = self.optimizer.param_groups[0]["lr"]
 
@@ -737,8 +910,7 @@ class Trainer:
                 self._total_train_time = self._accumulated_train_time + (time.time() - fit_start)
                 epochs_this_session = epoch - self.start_epoch + 1
 
-                # 计算平均每轮耗时（综合历史和当前会话）
-                total_history_epochs = len(self.history["train_loss"])  # 之前累积的 epoch 数
+                total_history_epochs = len(self.history["train_loss"])
                 if total_history_epochs > 0 and self._accumulated_train_time > 0:
                     avg_epoch_time = self._total_train_time / total_history_epochs
                 else:
@@ -762,31 +934,48 @@ class Trainer:
                     else:
                         self.scheduler.step()
 
-                # 最优模型保存
-                marker = ""
-                if val_acc > self.best_val_acc:
+                # ---- best 判定（monitor_metric，F13）----
+                acc_improved = val_acc > self.best_val_acc
+                if acc_improved:
                     self.best_val_acc = val_acc
-                    self.best_model_state = copy.deepcopy(self.model.state_dict())
-                    patience_counter = 0
-                    self.save_checkpoint(self.save_dir / "local_best.pth", is_best=False)
-                    # 全局最佳：仅当超过跨会话历史记录时才保存
-                    if val_acc > self.global_best_val_acc:
-                        self.global_best_val_acc = val_acc
-                        self.global_best_model_state = copy.deepcopy(self.model.state_dict())
-                        self.save_checkpoint(self.save_dir / "global_best.pth", is_best=True)
-                    marker = " *"
-                else:
-                    patience_counter += 1
 
-                # 定期保存（带时间戳，区分不同运行）
-                if epoch % save_every == 0:
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    self.save_checkpoint(
-                        self.save_dir / f"checkpoint_epoch{epoch:03d}_{ts}.pth",
-                        history=copy.deepcopy(self.history),
+                if self.monitor_metric == "val_acc":
+                    current_metric = val_acc
+                    improved = self.best_monitor_value is None or val_acc > self.best_monitor_value
+                else:  # val_loss（越小越好）
+                    current_metric = val_loss
+                    improved = self.best_monitor_value is None or val_loss < self.best_monitor_value
+
+                marker = ""
+                if improved:
+                    self.best_monitor_value = current_metric
+                    self.best_epoch = epoch
+                    if self.save_best:
+                        self.save_checkpoint(self.checkpoints_dir / "best.pth")
+                    marker = " *"
+
+                # ---- 早停计数（F08）----
+                if self.patience > 0:
+                    self.acc_patience_counter = 0 if acc_improved else self.acc_patience_counter + 1
+
+                if self.val_loss_patience > 0:
+                    self.hist_min_val_loss, self.loss_worse_counter = update_val_loss_monitor(
+                        self.hist_min_val_loss, self.loss_worse_counter,
+                        val_loss, self.val_loss_threshold,
                     )
-                    # 自动清理最旧的定期断点
+
+                # ---- 定期保存 ----
+                if epoch % save_every == 0:
+                    self.save_checkpoint(
+                        self.checkpoints_dir / f"epoch_{epoch:04d}.pth"
+                    )
                     self._cleanup_old_checkpoints()
+
+                # ---- last.pth（最新完整 epoch，续训入口）----
+                self.save_checkpoint(self.checkpoints_dir / "last.pth")
+
+                # ---- history 落盘 ----
+                self._write_history()
 
                 epoch_str = _format_duration(epoch_elapsed)
                 eta_str = _format_duration(eta_seconds) if remaining_epochs > 0 else "--"
@@ -799,60 +988,80 @@ class Trainer:
                     f"{epoch_str} | ETA {eta_str}{marker}"
                 )
 
-                # Early stopping（兼顾 val_acc 和 val_loss）
-                if patience_counter >= self.patience:
-                    print(f"\nEarly stopping at [Epoch {epoch} | 本轮 {session_epoch}/{additional_epochs}], "
-                          f"best val_acc: {self.best_val_acc:.4f}")
+                # ---- 早停判定（触发时记录原因）----
+                if self.patience > 0 and self.acc_patience_counter >= self.patience:
+                    stop_reason = (
+                        f"val_acc 早停：连续 {self.patience} 轮无改善"
+                        f"（best val_acc={self.best_val_acc:.4f}）"
+                    )
+                if (
+                    self.val_loss_patience > 0
+                    and self.loss_worse_counter >= self.val_loss_patience
+                ):
+                    reason_loss = (
+                        f"val_loss 早停：连续 {self.val_loss_patience} 轮高于历史最小值"
+                        f"（{self.hist_min_val_loss:.4f}）的 {self.val_loss_threshold} 倍"
+                    )
+                    stop_reason = stop_reason + "；" + reason_loss if stop_reason else reason_loss
+
+                if stop_reason:
+                    print(f"\nEarly stopping at [Epoch {epoch}]: {stop_reason}")
                     break
 
-                # val_loss 辅助监控：与 patience_counter 整合
-                # 当 val_loss 连续 val_loss_patience 轮持续上升（超过阈值）时触发
-                if self.val_loss_patience > 0 and len(self.history["val_loss"]) >= self.val_loss_patience:
-                    recent_losses = self.history["val_loss"][-self.val_loss_patience:]
-                    if min(recent_losses) > recent_losses[0] * self.val_loss_threshold:
-                        print(f"\nVal loss 持续上升（最后 {self.val_loss_patience} 轮），自动停止 (第 {epoch} 轮)")
-                        break
-
-                # LR 下界熔断：LR 降至极低 (< 1e-7) 时自动停止
+                # LR 下界熔断
                 if current_lr < 1e-7:
-                    print(f"\nLR 已降至 {current_lr:.2e}，自动停止训练 (第 {epoch} 轮)")
-                    print(f"  best val_acc: {self.best_val_acc:.4f}")
+                    stop_reason = f"LR 已降至 {current_lr:.2e}，自动停止训练"
+                    print(f"\n{stop_reason} (第 {epoch} 轮)")
                     break
 
         except KeyboardInterrupt:
-            # P0-3: 暂停时自动保存断点（带时间戳）
+            interrupted = True
             self._total_train_time = self._accumulated_train_time + (time.time() - fit_start)
-            interrupted_epoch = getattr(self, '_current_epoch', self.start_epoch)
+            interrupted_epoch = getattr(self, "_current_epoch", self.start_epoch)
             print(f"\n⚠️  训练被用户中断 (第 {interrupted_epoch} 轮)")
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            interrupt_path = self.save_dir / f"interrupted_epoch{interrupted_epoch:03d}_{ts}.pth"
-            self.save_checkpoint(
-                interrupt_path,
-                history=copy.deepcopy(self.history),
+            interrupt_path = (
+                self.checkpoints_dir / f"interrupted_epoch{interrupted_epoch:03d}_{ts}.pth"
             )
-            print(f"✅ 断点已自动保存至: {interrupt_path}")
-            print(f"   可通过 load_checkpoint('{interrupt_path}') 恢复训练\n")
+            self.save_checkpoint(interrupt_path, partial=True)
+            print(f"断点已保存至: {interrupt_path}（partial：权重含未完成 epoch 的部分更新）")
+            print("   可通过 --resume auto 从最近完整 epoch 继续")
+        except Exception as e:
+            self._persist_run_meta(status="failed", error=repr(e))
+            raise
 
-        # 保存训练历史
-        history_path = self.log_dir / "history.json"
-        with open(history_path, "w", encoding="utf-8") as f:
-            json.dump(self.history, f, indent=2)
+        # ---- 收尾 ----
+        self._write_history()
+        final_epoch = getattr(self, "_current_epoch", self.start_epoch - 1)
+
+        if interrupted:
+            self._persist_run_meta(
+                status="interrupted",
+                interrupted_at=datetime.now().isoformat(),
+                final_epoch=final_epoch,
+            )
+        else:
+            self._persist_run_meta(
+                status="finished",
+                finished_at=datetime.now().isoformat(),
+                final_epoch=final_epoch,
+                stop_reason=stop_reason,
+                best_val_acc=self.best_val_acc,
+                best_monitor_value=self.best_monitor_value,
+                best_monitor_metric=self.monitor_metric,
+                best_epoch=self.best_epoch,
+            )
 
         total_dur = _format_duration(self._total_train_time)
-        final_epoch = getattr(self, '_current_epoch', self.start_epoch - 1)
         print(f"\n{'=' * 60}")
-        print(f"训练完成 | 训练至第 {final_epoch} 轮 | 最优 val_acc: {self.best_val_acc:.4f} | 总用时: {total_dur}")
-        print(f"训练历史: {history_path}")
+        print(f"训练结束 | 训练至第 {final_epoch} 轮 | "
+              f"best val_acc: {self.best_val_acc:.4f} | 总用时: {total_dur}")
+        if stop_reason:
+            print(f"停止原因: {stop_reason}")
+        print(f"Run 目录: {self.run_dir}")
+        if self.save_best:
+            print(f"最优模型: {self.checkpoints_dir / 'best.pth'}")
+        print(f"续训断点: {self.checkpoints_dir / 'last.pth'}")
         print(f"{'=' * 60}")
 
         return self.history
-
-
-# ============================================================
-# 以下函数已迁移至 training/checkpoint.py
-# find_resume_checkpoint, select_checkpoint_widget,
-# _build_checkpoint_label, _build_summary_card
-#
-# 通过 import 从 checkpoint.py 重导出，保持向后兼容。
-# 查看实现请打开 training/checkpoint.py
-# ============================================================

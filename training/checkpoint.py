@@ -1,29 +1,76 @@
 """
-Checkpoint 管理模块 — 从 trainer.py 拆分
+Checkpoint 与 run 管理模块 — run 隔离（F05）/ 完整续训状态（F09）
 
 职责:
-  - 保存/加载 checkpoint（模型权重 + 优化器状态 + 训练历史）
-  - 轻量元数据读取（不加载完整权重）
-  - 旧 checkpoint 自动清理
-  - Checkpoint 选择 UI 组件（ipywidgets）
+  - run 目录与元数据：training/runs/<model_name>/<run_id>/
+  - 保存 / 加载 checkpoint（模型、优化器、调度器、AMP scaler、RNG、早停状态、history）
+  - 原子写入：先写临时文件再替换；保存失败不破坏上一份可用断点
+  - 定期断点清理
+  - 续训断点自动发现（最新 run 的最新完整 last.pth）
+
+run 目录结构:
+    training/runs/<model_name>/<run_id>/
+        config_effective.yaml      # 启动时最终生效配置（CLI 覆盖后）
+        run_meta.json              # CLI 参数 / seed / git / 环境 / 数据指纹 / 状态
+        history.json               # 训练历史（每 epoch 更新）
+        checkpoints/
+            last.pth               # 最新完整 epoch（续训入口）
+            best.pth               # 本 run 最优（受 checkpoint.save_best 控制）
+            epoch_XXXX.pth         # 定期断点
+            interrupted_*.pth      # 中断断点（partial=True）
+
+checkpoint 格式版本: 2。旧格式（1，training/checkpoints/ 下历史产物）不包含
+RNG / scaler / 早停状态，不支持精确续训，load 时明确报错（不静默降级）。
 
 用法:
     from training.checkpoint import save_checkpoint, load_checkpoint
-    load_checkpoint(trainer, "path/to/checkpoint.pth")
+    save_checkpoint(trainer, run_dir / "checkpoints" / "last.pth")
+    load_checkpoint(trainer, "training/runs/mini_cnn/<run_id>/checkpoints/last.pth")
 """
 
-import json
-import copy
-import logging
-from pathlib import Path
-from datetime import datetime
+__all__ = [
+    "CHECKPOINT_FORMAT_VERSION",
+    "collect_git_info",
+    "collect_environment_info",
+    "write_json_atomic",
+    "write_run_meta",
+    "read_run_meta",
+    "save_checkpoint",
+    "load_checkpoint",
+    "load_checkpoint_metadata",
+    "cleanup_old_checkpoints",
+    "find_resume_checkpoint",
+    "select_checkpoint_widget",
+    "_format_duration",
+]
 
+import json
+import logging
+import os
+import platform
+import random as pyrandom
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
 import torch
 
 # 项目根目录（直接计算，避免循环依赖）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 logger = logging.getLogger("checkpoint")
+
+CHECKPOINT_FORMAT_VERSION = 2
+
+# run 根目录：training/runs/
+RUNS_ROOT = PROJECT_ROOT / "training" / "runs"
+# 旧产物目录（只读保留）：training/checkpoints/
+LEGACY_CHECKPOINT_ROOT = PROJECT_ROOT / "training" / "checkpoints"
+
+_EPOCH_CKPT_GLOB = "epoch_*.pth"
 
 
 # ============================================================
@@ -60,28 +107,123 @@ def _relative_time(ts: str) -> str:
         return ""
 
 
-def _progress_bar(current: int, total: int, width: int = 10) -> str:
-    """生成文本进度条 (如 ████░░░░░░)"""
-    if total <= 0:
-        return ""
-    ratio = min(current / total, 1.0)
-    filled = int(width * ratio)
-    return "\u2588" * filled + "\u2591" * (width - filled)
+# ============================================================
+# run 元数据收集
+# ============================================================
+def collect_git_info(root: Path | None = None) -> dict:
+    """收集 git 提交与工作区状态；非 git 环境或失败时返回 unknown 标记。"""
+    root = root or PROJECT_ROOT
+    info: dict[str, object] = {"commit": "unknown", "dirty": None, "dirty_files": None}
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=10
+        )
+        if commit.returncode == 0:
+            info["commit"] = commit.stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, timeout=10
+        )
+        if status.returncode == 0:
+            files = [
+                line.split(maxsplit=1)[-1]
+                for line in status.stdout.splitlines()
+                if line.strip()
+            ]
+            info["dirty"] = bool(files)
+            info["dirty_files"] = files[:50]
+    except Exception as e:  # git 不可用不应阻断训练
+        logger.warning("git 信息收集失败: %s", e)
+    return info
+
+
+def collect_environment_info() -> dict:
+    """收集 Python / torch / CUDA / 设备环境信息。"""
+    info = {
+        "python": platform.python_version(),
+        "platform": sys.platform,
+        "torch": torch.__version__,
+        "cuda_runtime": torch.version.cuda,
+        "cuda_available": torch.cuda.is_available(),
+    }
+    if torch.cuda.is_available():
+        info["device_name"] = torch.cuda.get_device_name(0)
+    return info
+
+
+def write_json_atomic(path: Path, obj) -> Path:
+    """通用原子 JSON 写入（先写临时文件再替换，失败不破坏旧文件）。"""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_name, path)
+    except BaseException:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
+    return path
+
+
+def write_run_meta(run_dir: Path, meta: dict) -> Path:
+    """原子写入 run_meta.json。"""
+    return write_json_atomic(Path(run_dir) / "run_meta.json", meta)
+
+
+def read_run_meta(run_dir: Path) -> dict | None:
+    """读取 run_meta.json；不存在或损坏返回 None。"""
+    path = Path(run_dir) / "run_meta.json"
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning("run_meta.json 读取失败: %s", e)
+        return None
 
 
 # ============================================================
 # Checkpoint 核心操作
 # ============================================================
+def _capture_rng_state() -> dict:
+    """捕获 Python / NumPy / Torch / CUDA 随机数状态（F09 续训一致性）。"""
+    state = {
+        "python": pyrandom.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
 
-def save_checkpoint(trainer, path: Path, is_best: bool = False, history: dict = None):
+
+def _restore_rng_state(state: dict) -> list[str]:
+    """恢复 RNG 状态；返回未能恢复的项列表。"""
+    failed = []
+    try:
+        pyrandom.setstate(state["python"])
+        np.random.set_state(state["numpy"])
+        torch.set_rng_state(state["torch"])
+        if torch.cuda.is_available() and "torch_cuda" in state:
+            torch.cuda.set_rng_state_all(state["torch_cuda"])
+    except Exception as e:
+        failed.append(str(e))
+        logger.warning("RNG 状态恢复失败: %s", e)
+    return failed
+
+
+def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool = False):
     """
-    保存完整训练状态
+    保存完整训练状态（原子写入）。
 
     Args:
-        trainer: Trainer 实例（提供 model, optimizer, history 等属性）
+        trainer: Trainer 实例
         path: 保存路径
-        is_best: 是否为最佳模型（触发到推理目录的自动导出）
-        history: 训练历史，None 则使用 trainer.history
+        history: 训练历史；None 则使用 trainer.history
+        partial: True 表示 epoch 中途的中断保存（权重含未完成 epoch 的部分更新）
 
     Returns:
         path: 保存的文件路径
@@ -89,92 +231,138 @@ def save_checkpoint(trainer, path: Path, is_best: bool = False, history: dict = 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    hist = history or trainer.history
+    hist = history if history is not None else trainer.history
     # 以 history 长度作为已完成轮数的唯一来源
     epoch_num = len(hist.get("val_acc", []))
 
     checkpoint = {
-        "epoch": epoch_num,
-        "model_state_dict": trainer.model.state_dict(),
-        "optimizer_state_dict": trainer.optimizer.state_dict(),
-        "val_acc": hist["val_acc"][-1] if hist["val_acc"] else 0.0,
-        "val_loss": hist["val_loss"][-1] if hist["val_loss"] else 0.0,
-        "best_val_acc": trainer.best_val_acc,
-        "global_best_val_acc": trainer.global_best_val_acc,
-        "history": hist,
-        "config": trainer.model_config,
+        "format_version": CHECKPOINT_FORMAT_VERSION,
+        "run_id": getattr(trainer, "run_id", ""),
         "model_name": trainer.model_name,
-        "timestamp": datetime.now().isoformat(),
+        "model_spec": trainer.model_spec.to_dict(),
+        # torch.compile 的 OptimizedModule 会加 "_orig_mod." 前缀，保存前展开
+        "model_state_dict": getattr(trainer.model, "_orig_mod", trainer.model).state_dict(),
+        "optimizer_state_dict": trainer.optimizer.state_dict(),
+        "epoch": epoch_num,
+        "val_acc": hist["val_acc"][-1] if hist.get("val_acc") else None,
+        "val_loss": hist["val_loss"][-1] if hist.get("val_loss") else None,
+        "history": hist,
+        "best": {
+            "monitor_metric": trainer.monitor_metric,
+            "monitor_value": trainer.best_monitor_value,
+            "val_acc": trainer.best_val_acc,
+            "epoch": trainer.best_epoch,
+        },
+        "early_stop_state": {
+            "acc_patience_counter": trainer.acc_patience_counter,
+            "loss_worse_counter": trainer.loss_worse_counter,
+            "hist_min_val_loss": trainer.hist_min_val_loss,
+        },
+        "rng": _capture_rng_state(),
         "training_duration_seconds": getattr(trainer, "_total_train_time", 0.0),
+        "class_counts": getattr(trainer, "class_counts", None),
+        "partial": partial,
+        "timestamp": datetime.now().isoformat(),
     }
-    # 保存调度器状态（修复断点恢复时 LR 周期重置问题）
     if trainer.scheduler is not None:
         checkpoint["scheduler_state_dict"] = trainer.scheduler.state_dict()
-    torch.save(checkpoint, path)
+    if getattr(trainer, "scaler", None) is not None:
+        checkpoint["scaler_state_dict"] = trainer.scaler.state_dict()
 
-    # P0-1: 最佳模型自动导出到推理目录
-    if is_best:
-        import shutil
-        inference_dir = PROJECT_ROOT / "inference" / "saved_models"
-        inference_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(path, inference_dir / f"{trainer.model_name}_best.pth")
+    # 原子写：临时文件 + 替换（保存失败不破坏上一份可用断点）
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".ckpt_", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            torch.save(checkpoint, f)
+        os.replace(tmp_name, path)
+    except BaseException:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
 
     return path
 
 
-def load_checkpoint(trainer, checkpoint_path: str) -> dict:
+def load_checkpoint(trainer, checkpoint_path) -> dict:
     """
-    从 checkpoint 恢复训练状态
+    从 checkpoint 恢复完整训练状态（F09）。
 
-    Args:
-        trainer: Trainer 实例（提供 model, optimizer, model_name 等属性）
-        checkpoint_path: checkpoint 文件路径
-
-    Returns:
-        checkpoint 信息字典
+    恢复内容：模型权重、优化器、调度器、AMP scaler、RNG、history、
+    本轮 best（值/epoch）、早停计数、累计训练时间。
 
     Raises:
         FileNotFoundError: 文件不存在
-        RuntimeError: checkpoint 不兼容
+        RuntimeError: 文件损坏 / 旧格式 / 模型名或规格不匹配
     """
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.exists():
-        raise FileNotFoundError(f"Checkpoint未找到: {checkpoint_path}")
+        raise FileNotFoundError(f"Checkpoint 未找到: {checkpoint_path}")
 
-    checkpoint = torch.load(checkpoint_path, map_location=trainer.device, weights_only=False)
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception as e:
+        raise RuntimeError(f"断点文件损坏或无法读取: {checkpoint_path}\n{e}") from e
 
-    # 版本校验：检查模型名和配置是否匹配
+    if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
+        raise RuntimeError(f"文件不是有效的 checkpoint（缺少 model_state_dict）: {checkpoint_path}")
+
+    fmt = checkpoint.get("format_version")
+    if fmt != CHECKPOINT_FORMAT_VERSION:
+        raise RuntimeError(
+            f"断点格式版本 {fmt!r} 不受支持（当前支持 {CHECKPOINT_FORMAT_VERSION}）。\n"
+            "旧格式断点缺少 RNG / scaler / 早停状态，无法精确续训（不静默降级）。\n"
+            f"如确需使用: {checkpoint_path}，请先迁移或从头训练。"
+        )
+
+    # 模型名与规格校验
     ckpt_model_name = checkpoint.get("model_name", "")
     if ckpt_model_name and ckpt_model_name != trainer.model_name:
         raise RuntimeError(
             f"Checkpoint 模型名不匹配: checkpoint='{ckpt_model_name}', "
             f"当前='{trainer.model_name}'。请确认 checkpoint 路径正确。"
         )
-
-    # 恢复模型权重
-    try:
-        trainer.model.load_state_dict(checkpoint["model_state_dict"])
-    except RuntimeError as e:
+    ckpt_spec = checkpoint.get("model_spec")
+    if ckpt_spec is None:
+        raise RuntimeError(f"Checkpoint 缺少 model_spec 字段: {checkpoint_path}")
+    current_spec = trainer.model_spec.to_dict()
+    if ckpt_spec != current_spec:
         raise RuntimeError(
-            f"模型结构不匹配，无法加载 checkpoint: {e}\n"
-            f"请确认 checkpoint 是用相同的模型架构训练的。"
-        ) from e
+            "Checkpoint 的 model_spec 与当前训练配置不一致，拒绝续训：\n"
+            f"  checkpoint: {ckpt_spec}\n"
+            f"  当前配置 : {current_spec}\n"
+            "请使用与断点一致的数据/模型配置，或从头训练。"
+        )
 
-    # 恢复优化器状态
+    # 恢复模型权重（torch.compile 场景同样展开到原始模块）
+    try:
+        getattr(trainer.model, "_orig_mod", trainer.model).load_state_dict(
+            checkpoint["model_state_dict"]
+        )
+    except RuntimeError as e:
+        raise RuntimeError(f"模型结构不匹配，无法加载 checkpoint: {e}") from e
+
+    # 优化器
     if "optimizer_state_dict" in checkpoint:
         trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-    # 恢复调度器状态（修复断点恢复时 LR 周期重置问题）
-    # 兼容旧 checkpoint（无 scheduler_state_dict 字段）：仅在字段存在且调度器可用时恢复
-    if "scheduler_state_dict" in checkpoint and trainer.scheduler is not None:
-        trainer.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        logger.info("  - 调度器状态已恢复（LR 周期连续）")
+    # 调度器
+    if "scheduler_state_dict" in checkpoint:
+        if trainer.scheduler is not None:
+            trainer.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            logger.info("  - 调度器状态已恢复（LR 周期连续）")
+    elif trainer.scheduler is not None:
+        logger.warning("  - 断点无调度器状态（残留旧格式？），调度器保持初始化状态")
 
-    # 恢复训练历史（必须在计算 start_epoch 之前）
+    # AMP scaler
+    if "scaler_state_dict" in checkpoint and getattr(trainer, "scaler", None) is not None:
+        trainer.scaler.load_state_dict(checkpoint["scaler_state_dict"])
+        logger.info("  - AMP GradScaler 状态已恢复")
+
+    # 训练历史
     if "history" in checkpoint:
         trainer.history = checkpoint["history"]
 
-    # 恢复训练进度
+    # 训练进度
     history_epochs = len(trainer.history.get("val_acc", []))
     saved_epoch = checkpoint.get("epoch", 0)
     if saved_epoch != history_epochs and history_epochs > 0:
@@ -185,23 +373,49 @@ def load_checkpoint(trainer, checkpoint_path: str) -> dict:
         saved_epoch = history_epochs
     trainer.start_epoch = saved_epoch + 1
 
-    # 恢复累积训练时间
+    # 累计训练时间
     trainer._accumulated_train_time = checkpoint.get("training_duration_seconds", 0.0)
 
-    # 恢复最优验证准确率
-    # ⚠️ best_val_acc 不恢复：让新 session 从 0 开始累计"本轮最佳"
-    #    global_best_val_acc 恢复：它是跨会话的"全局最佳"记录
-    trainer.best_val_acc = 0.0
-    trainer.best_model_state = None
-    trainer.global_best_val_acc = 0.0
-    if "global_best_val_acc" in checkpoint:
-        trainer.global_best_val_acc = checkpoint["global_best_val_acc"]
+    # 本轮 best（值/epoch 恢复，保证"同一后续指标序列触发于相同位置"）
+    best = checkpoint.get("best") or {}
+    trainer.best_val_acc = float(best.get("val_acc", 0.0))
+    trainer.best_epoch = int(best.get("epoch", 0))
+    trainer.best_monitor_value = best.get("monitor_value")
+
+    # 早停计数
+    es = checkpoint.get("early_stop_state") or {}
+    trainer.acc_patience_counter = int(es.get("acc_patience_counter", 0))
+    trainer.loss_worse_counter = int(es.get("loss_worse_counter", 0))
+    trainer.hist_min_val_loss = es.get("hist_min_val_loss")
+
+    # RNG（批次顺序一致性）
+    rng_failed = []
+    if "rng" in checkpoint:
+        rng_failed = _restore_rng_state(checkpoint["rng"])
+    else:
+        rng_failed = ["断点缺少 RNG 状态"]
+
+    # partial 标注
+    if checkpoint.get("partial"):
+        logger.warning(
+            "  - 该断点为 epoch 中途的 partial 保存：权重含未完成 epoch 的部分更新，"
+            "history 从最近完整 epoch(=%d) 继续；如需严格一致请从 last.pth 恢复",
+            saved_epoch,
+        )
 
     logger.info("已从 %s 恢复训练:", checkpoint_path)
-    logger.info("  - 上次训练到 epoch %s", checkpoint.get('epoch', '?'))
-    logger.info("  - 全局最佳 val_acc: %.4f (跨会话)", trainer.global_best_val_acc)
-    logger.info("  - 本轮 session 最佳 val_acc 从 0 开始累计")
+    logger.info("  - 上次训练到 epoch %s", checkpoint.get("epoch", "?"))
+    logger.info("  - 本轮 best: %s=%.4f (epoch %d)",
+                best.get("monitor_metric", "val_acc"),
+                float(best.get("monitor_value", best.get("val_acc", 0.0)) or 0.0),
+                trainer.best_epoch)
+    logger.info(
+        "  - 早停计数: acc=%d, loss_worse=%d",
+        trainer.acc_patience_counter, trainer.loss_worse_counter,
+    )
     logger.info("  - 将从 epoch %d 继续训练", trainer.start_epoch)
+    if rng_failed:
+        logger.warning("  - RNG 恢复不完整: %s（批次顺序可能不一致）", rng_failed)
 
     return checkpoint
 
@@ -209,47 +423,43 @@ def load_checkpoint(trainer, checkpoint_path: str) -> dict:
 def load_checkpoint_metadata(path: Path) -> dict | None:
     """
     轻量读取 checkpoint 元数据（不加载完整模型权重）。
-    无需 GPU，适合在 Jupyter widget 或文件扫描场景中使用。
-
-    Args:
-        path: checkpoint 文件路径
-
-    Returns:
-        包含 epoch / val_acc / best_val_acc / model_name / timestamp /
-        trained_epochs / training_duration_seconds 的字典，
-        读取失败时返回 None
+    对新旧格式都尽力读取；读取失败返回 None。
     """
     try:
         ckpt = torch.load(path, map_location="cpu", weights_only=False)
         history = ckpt.get("history", {})
+        best = ckpt.get("best") or {}
         return {
+            "format_version": ckpt.get("format_version", 1),
+            "run_id": ckpt.get("run_id", ""),
             "epoch": ckpt.get("epoch", 0),
             "val_acc": ckpt.get("val_acc", 0.0),
-            "best_val_acc": ckpt.get("best_val_acc", 0.0),
-            "global_best_val_acc": ckpt.get("global_best_val_acc", 0.0),
+            "best_val_acc": best.get("val_acc", ckpt.get("best_val_acc", 0.0)),
+            "monitor_metric": best.get("monitor_metric", "val_acc"),
+            "monitor_value": best.get("monitor_value"),
             "model_name": ckpt.get("model_name", ""),
             "timestamp": ckpt.get("timestamp", ""),
             "trained_epochs": len(history.get("val_acc", [])) if history else 0,
             "training_duration_seconds": ckpt.get("training_duration_seconds", 0.0),
+            "partial": bool(ckpt.get("partial", False)),
         }
     except Exception:
         return None
 
 
-def cleanup_old_checkpoints(save_dir: Path, config: dict):
+def cleanup_old_checkpoints(checkpoints_dir: Path, config: dict):
     """
-    自动清理最旧的定期断点文件，保留最新的 max_checkpoint_files 份。
-    仅删除 checkpoint_epoch*.pth，不影响 best_model.pth 和 interrupted_*.pth。
+    自动清理最旧的定期断点（epoch_*.pth），保留最新的 max_checkpoint_files 份。
+    不影响 last.pth / best.pth / interrupted_*.pth。
     """
     max_files = config["checkpoint"].get("max_checkpoint_files", 5)
     if max_files <= 0:
         return
 
     epoch_ckpts = sorted(
-        save_dir.glob("checkpoint_epoch*.pth"),
+        Path(checkpoints_dir).glob(_EPOCH_CKPT_GLOB),
         key=lambda p: p.stat().st_mtime,
     )
-
     while len(epoch_ckpts) > max_files:
         oldest = epoch_ckpts.pop(0)
         oldest.unlink()
@@ -257,221 +467,97 @@ def cleanup_old_checkpoints(save_dir: Path, config: dict):
 
 
 # ============================================================
-# Checkpoint 自动检测
+# 续训断点自动发现
 # ============================================================
-def find_resume_checkpoint(model_name: str, prefer: str = "best"):
+def find_resume_checkpoint(model_name: str):
     """
-    自动检测并返回最适合恢复训练的 checkpoint 路径。
-
-    优先级:
-      1. global_best.pth（若有且 prefer='best'）
-      2. local_best.pth（若有且 prefer='best'）
-      3. 最新的 interrupted_*.pth（若有且 prefer='interrupted'）
-      4. 最新的 checkpoint_epoch*.pth（按修改时间）
-      5. 旧版兼容: best_model.pth（若有）
-
-    Args:
-        model_name: 模型名称
-        prefer: 'best' 优先选最佳模型, 'latest' 优先选最新断点
+    返回该模型全部 run 中最新的 last.pth（按修改时间倒序取第一个）。
+    只返回新格式 run 断点；旧 training/checkpoints/ 目录产物不可用于精确续训。
 
     Returns:
-        checkpoint 路径，无可用 checkpoint 时返回 None
+        checkpoint 路径，无可用断点时返回 None
     """
-    checkpoint_dir = PROJECT_ROOT / "training" / "checkpoints" / model_name
-    if not checkpoint_dir.exists():
+    model_runs = RUNS_ROOT / model_name
+    if not model_runs.exists():
         return None
-
-    if prefer == "best":
-        global_best = checkpoint_dir / "global_best.pth"
-        if global_best.exists():
-            return global_best
-        local_best = checkpoint_dir / "local_best.pth"
-        if local_best.exists():
-            return local_best
-        old_best = checkpoint_dir / "best_model.pth"
-        if old_best.exists():
-            return old_best
-
-    interrupted = sorted(
-        checkpoint_dir.glob("interrupted_*.pth"),
-        key=lambda p: p.stat().st_mtime, reverse=True,
+    candidates = sorted(
+        model_runs.glob("*/checkpoints/last.pth"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
     )
-    if interrupted:
-        return interrupted[0]
-
-    periodic = sorted(
-        checkpoint_dir.glob("checkpoint_epoch*.pth"),
-        key=lambda p: p.stat().st_mtime, reverse=True,
-    )
-    if periodic:
-        return periodic[0]
-
-    return None
+    return candidates[0] if candidates else None
 
 
 # ============================================================
-# ipywidgets Checkpoint 选择弹窗
+# ipywidgets Checkpoint 选择弹窗（扫描新格式 runs 目录）
 # ============================================================
-def _build_checkpoint_label(path: Path, meta: dict | None, size_mb: float, best_val_acc: float) -> str:
-    """构建单条 checkpoint 的下拉菜单显示标签"""
+def _build_checkpoint_label(path: Path, meta: dict | None) -> str:
+    """构建单条 checkpoint 的下拉菜单显示标签。"""
     name = path.name
-    if name == "global_best.pth":
-        tag = "\u2605 Global Best"
-    elif name == "local_best.pth":
-        tag = "\u2605 Local Best"
-    elif name == "best_model.pth":
-        tag = "\u2605 Best"
+    if name == "last.pth":
+        tag = "\u23ea Last(完整)"
+    elif name == "best.pth":
+        tag = "\u2605 Best(run 最优)"
     elif name.startswith("interrupted_"):
-        tag = "\u26a0 中断"
-    else:
+        tag = "\u26a0 中断(partial)"
+    elif name.startswith("epoch_"):
         tag = "  定期"
-
-    if not meta:
-        return f"{tag} | (元数据不可读) | {size_mb:.1f}MB"
-
-    time_str = _relative_time(meta.get("timestamp", ""))
-    acc_pct = meta["val_acc"] * 100
-    acc_str = f"{acc_pct:.2f}%"
-
-    is_best_tag = name in ("global_best.pth", "local_best.pth", "best_model.pth")
-    trained = meta.get("trained_epochs", meta.get("epoch", 0))
-    saved_epoch = meta.get("epoch", 0)
-    if saved_epoch != trained and trained > 0:
-        epoch_str = f"已训练{trained}轮(权重第{saved_epoch}轮)"
     else:
-        epoch_str = f"已训练{trained}轮"
+        tag = "  ?"
 
-    dur = meta.get("training_duration_seconds", 0.0)
-    dur_str = _format_duration(dur) if dur > 0 else ""
-
-    delta_str = ""
-    if not is_best_tag and best_val_acc > 0 and meta["val_acc"] > 0:
-        delta = (meta["val_acc"] - best_val_acc) * 100
-        if abs(delta) > 0.01:
-            delta_str = f"({delta:+.2f}%)"
-
-    parts = [tag, time_str, acc_str, epoch_str]
-    if dur_str:
-        parts.append(dur_str)
-    if delta_str:
-        parts.append(delta_str)
-    if not is_best_tag:
-        parts.append(f"{size_mb:.1f}MB")
-
-    return " | ".join(parts)
-
-
-def _build_summary_card(best_entry, model_name: str) -> str:
-    """构建最佳模型摘要 HTML 卡片"""
-    if not best_entry:
-        return '<div style="color:#888; padding:4px 0;">暂无已训练的 checkpoint</div>'
-
-    _, meta = best_entry
     if not meta:
-        return f'<div style="color:#888; padding:4px 0;">{best_entry[0].name} (元数据不可读)</div>'
+        return f"{tag} | {path.parent.parent.name} | (元数据不可读)"
 
-    acc_pct = meta["val_acc"] * 100
-    global_best_pct = meta.get("global_best_val_acc", meta["val_acc"]) * 100
     time_str = _relative_time(meta.get("timestamp", ""))
+    acc_str = f"val_acc={meta['val_acc'] * 100:.2f}%"
+    run_id = meta.get("run_id", path.parent.parent.name)
     trained = meta.get("trained_epochs", meta.get("epoch", 0))
-    dur = meta.get("training_duration_seconds", 0.0)
-    dur_str = _format_duration(dur) if dur > 0 else "--"
-    source = best_entry[0].name if best_entry else ""
-
-    return (
-        f'<div style="background:#f0f8ff; border-left:3px solid #4a90d9; padding:6px 10px; '
-        f'border-radius:4px; font-size:13px; margin-bottom:6px;">'
-        f'<b>全局最佳:</b> {model_name} | '
-        f'val_acc=<b>{global_best_pct:.2f}%</b> | '
-        f'已训练 <b>{trained}</b> 轮 | '
-        f'用时 {dur_str} | '
-        f'{time_str}'
-        f'</div>'
-    )
+    return f"{tag} | {run_id} | {time_str} | {acc_str} | 已训练{trained}轮"
 
 
 def select_checkpoint_widget(model_name: str):
     """
-    扫描可用 checkpoint，通过 ipywidgets 弹窗让用户选择是否恢复训练。
-    确认后直接将选择结果写入 notebook 全局变量 RESUME_FROM。
+    扫描 training/runs/<model_name>/*/checkpoints/ 下的可用断点，
+    通过 ipywidgets 弹窗选择续训断点；确认后写入 notebook 全局变量 RESUME_FROM。
 
-    下拉菜单每条显示: 类型 | 相对时间 | 准确率 | 已训练轮数 | 训练时长 | 与best差距
-    顶部显示最佳模型摘要卡片。
-
-    Args:
-        model_name: 模型名称
+    注意：只有新格式 run 断点（last.pth / interrupted / 定期）可续训；
+    旧 training/checkpoints/ 产物不支持精确续训，不在此列出。
     """
     try:
         import ipywidgets as widgets
-        from IPython.display import display
         from IPython import get_ipython
+        from IPython.display import display
     except ImportError:
         print("ipywidgets 未安装，将从头开始训练。安装方式: pip install ipywidgets")
         return None
 
     ip = get_ipython()
-    checkpoint_dir = PROJECT_ROOT / "training" / "checkpoints" / model_name
+    model_runs = RUNS_ROOT / model_name
+    ip.user_ns["RESUME_FROM"] = None
 
-    best_entry = None
-    global_best_val_acc = 0.0
-    all_entries = []
+    entries = []
+    if model_runs.exists():
+        for path in model_runs.glob("*/checkpoints/*.pth"):
+            meta = load_checkpoint_metadata(path)
+            if meta is not None and meta.get("format_version") == CHECKPOINT_FORMAT_VERSION:
+                entries.append((path, meta, path.stat().st_mtime))
 
-    if checkpoint_dir.exists():
-        for p in checkpoint_dir.glob("*.pth"):
-            meta = load_checkpoint_metadata(p)
-            size_mb = p.stat().st_size / (1024 * 1024)
-            mtime = p.stat().st_mtime
-            entry = (p, meta, size_mb, mtime)
-
-            if p.name == "global_best.pth":
-                best_entry = entry
-                if meta:
-                    global_best_val_acc = meta.get("global_best_val_acc", meta["val_acc"])
-            elif p.name == "local_best.pth" or p.name == "best_model.pth":
-                all_entries.append(entry)
-                if meta and meta["val_acc"] > global_best_val_acc:
-                    global_best_val_acc = meta["val_acc"]
-            else:
-                all_entries.append(entry)
-
-    all_entries.sort(key=lambda e: e[3], reverse=True)
-
-    if not best_entry and not all_entries:
-        print(f"未找到 {model_name} 的任何 checkpoint，将从头开始训练。")
-        ip.user_ns["RESUME_FROM"] = None
+    if not entries:
+        print(
+            f"未找到 {model_name} 的可续训断点（training/runs/ 下无新格式 run），"
+            "将从头开始训练。"
+        )
         return None
 
-    best_val_acc = max(
-        global_best_val_acc,
-        best_entry[1]["val_acc"] if best_entry and best_entry[1] else 0.0,
-    )
-
-    label_entries = []
-    if best_entry:
-        path, meta, size_mb, _ = best_entry
-        label = _build_checkpoint_label(path, meta, size_mb, best_val_acc)
-        label_entries.append((path, label, meta))
-
-    for path, meta, size_mb, _ in all_entries:
-        label = _build_checkpoint_label(path, meta, size_mb, best_val_acc)
-        label_entries.append((path, label, meta))
+    entries.sort(key=lambda e: e[2], reverse=True)
+    label_entries = [(p, _build_checkpoint_label(p, m), m) for p, m, _ in entries]
 
     options = ["\u2795 [从头开始训练]"] + [item[1] for item in label_entries]
-
-    summary_html = _build_summary_card(
-        (best_entry[0], best_entry[1]) if best_entry else None,
-        model_name,
-    )
-    summary_html += f'<div style="font-size:12px; color:#666; margin-bottom:4px;">共 {len(label_entries)} 个 checkpoint 可选</div>'
-
     dropdown = widgets.Dropdown(
         options=options,
         value=options[0],
-        description="",
-        layout=widgets.Layout(width="680px"),
-        style={"description_width": "0px"},
+        layout=widgets.Layout(width="760px"),
     )
-
     confirm_btn = widgets.Button(
         description="确认选择",
         button_style="primary",
@@ -479,40 +565,27 @@ def select_checkpoint_widget(model_name: str):
     )
     result_box = widgets.Output(layout=widgets.Layout(margin="4px 0 0 0"))
 
-    default_path = None
-    ip.user_ns["RESUME_FROM"] = default_path
-
-    def on_confirm(btn):
-        btn.disabled = True
-        confirm_btn.button_style = "success"
-        confirm_btn.description = "已确认"
+    def on_confirm(_btn):
+        selected = dropdown.value
         with result_box:
             result_box.clear_output()
-            selected = dropdown.value
-            if selected.startswith("\u2795 [从头开始训练]"):
+            if selected.startswith("\u2795"):
                 ip.user_ns["RESUME_FROM"] = None
                 print(">>> 从头开始训练")
             else:
                 for path, label, meta in label_entries:
                     if label == selected:
                         ip.user_ns["RESUME_FROM"] = path
-                        if meta:
-                            trained = meta.get("trained_epochs", meta.get("epoch", 0))
-                            dur = _format_duration(meta.get("training_duration_seconds", 0))
-                            print(f">>> 恢复训练: {path.name}")
-                            print(f"    val_acc={meta['val_acc']:.4f}  "
-                                  f"best_val_acc={meta['best_val_acc']:.4f}  "
-                                  f"已训练 {trained} 轮  用时 {dur or '--'}")
-                        else:
-                            print(f">>> 恢复训练: {path.name}")
+                        print(f">>> 恢复训练: {path}")
+                        print(f"    run={meta.get('run_id')} epoch={meta.get('epoch')} "
+                              f"val_acc={meta['val_acc']:.4f} partial={meta.get('partial')}")
                         break
 
     confirm_btn.on_click(on_confirm)
-
     display(widgets.VBox([
-        widgets.HTML(f"<b>选择 Checkpoint</b> <span style='font-weight:normal; font-size:12px; color:#666;'>"
-                     f"点击「确认选择」生效</span>"),
-        widgets.HTML(summary_html),
+        widgets.HTML("<b>选择 Checkpoint（新格式 runs）</b> "
+                     "<span style='font-weight:normal; font-size:12px; color:#666;'>"
+                     "点击「确认选择」生效</span>"),
         widgets.HBox([dropdown, confirm_btn]),
         result_box,
     ]))

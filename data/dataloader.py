@@ -6,20 +6,23 @@
   - FER2013Dataset: 从 CSV 按需加载图像并支持 transform
   - build_train_transform: 根据配置组合数据增强管道
   - create_dataloaders: 读取 CSV → 划分 → 构建 DataLoader
-  - compute_class_weights: 计算逆频率类别权重
+  - compute_class_counts: 按固定索引统计类别样本数（采样器与损失共用）
+  - compute_split_fingerprint: CSV + 各划分指纹（供 run 元数据追溯）
+  - compute_class_weights: 计算逆频率类别权重（已弃用工具）
 
 用法:
     from data.dataloader import create_dataloaders, FER2013Dataset
     train_loader, val_loader, test_loader, classes = create_dataloaders(config)
 """
 
+import hashlib
 import warnings
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-import torch
 import pandas as pd
-from sklearn.model_selection import train_test_split
+import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
@@ -33,6 +36,8 @@ __all__ = [
     "FER2013Dataset",
     "build_train_transform",
     "build_class_aug_transform",
+    "compute_class_counts",
+    "compute_split_fingerprint",
     "create_dataloaders",
     "compute_class_weights",
     "PROJECT_ROOT",
@@ -54,7 +59,7 @@ class FER2013Dataset(Dataset):
     - pin_memory 实现异步 CPU→GPU 传输
     """
 
-    def __init__(self, dataframe, transform=None, class_aug_map: dict = None):
+    def __init__(self, dataframe, transform=None, class_aug_map: dict | None = None):
         """
         Args:
             dataframe: pandas DataFrame，含 emotion 和 pixels 列
@@ -64,6 +69,9 @@ class FER2013Dataset(Dataset):
         """
         self.transform = transform
         self.class_aug_map = class_aug_map or {}
+        # 训练元数据（由 create_dataloaders 填充；默认 None）
+        self.class_counts: list | None = None
+        self.split_fingerprint: dict | None = None
         # 预计算：一次性解析所有像素字符串为 float32 数组，后续取值 O(1)
         self._pixels = self._precompute_pixels(dataframe)
         # 仅提取 labels，不持有 DataFrame 引用（避免多进程 pickle 巨型对象）
@@ -153,17 +161,18 @@ def build_train_transform(aug_config: dict) -> transforms.Compose:
     return transforms.Compose(transform_list) if transform_list else None
 
 
-def build_class_aug_transform(aug_config: dict) -> dict:
+def build_class_aug_transform(aug_config: dict, *, master_enabled: bool = True) -> dict:
     """
     根据配置构建类别特定增强映射。
 
     Args:
         aug_config: configs 中 augmentation.class_specific 部分
+        master_enabled: augmentation.enabled 总开关；关闭时整体停用类别增强
 
     Returns:
         {class_index: (transform_compose, probability)} 字典
     """
-    if not aug_config.get("enabled", False):
+    if not master_enabled or not aug_config.get("enabled", False):
         return {}
 
     target_classes = aug_config.get("target_classes", [])
@@ -197,7 +206,7 @@ def build_class_aug_transform(aug_config: dict) -> dict:
 # ============================================================
 # DataLoader 工厂
 # ============================================================
-def create_dataloaders(config: dict, model_name: str = None):
+def create_dataloaders(config: dict, model_name: str | None = None):
     """
     创建训练/验证/测试 DataLoader
 
@@ -208,40 +217,47 @@ def create_dataloaders(config: dict, model_name: str = None):
         model_name: 模型名称，用于读取模型特定的 batch_size
 
     Returns:
-        train_loader, val_loader, test_loader, CLASS_NAMES
+        train_loader, val_loader, test_loader, class_names
     """
-    CLASS_NAMES = config["data"]["class_names"]
+    class_names = config["data"]["class_names"]
     use_cuda = torch.cuda.is_available()
 
     # 加载数据
     dataset_path = PROJECT_ROOT / config["data"]["dataset_path"]
     df = pd.read_csv(dataset_path)
 
-    # 按Usage划分或手动划分
-    if "Usage" in df.columns:
-        train_df = df[df["Usage"] == "Training"].reset_index(drop=True)
-        val_df = df[df["Usage"] == "PublicTest"].reset_index(drop=True)
-        test_df = df[df["Usage"] == "PrivateTest"].reset_index(drop=True)
-    else:
-        train_df, temp_df = train_test_split(
-            df, test_size=0.2, random_state=42, stratify=df["emotion"]
+    # 按官方 Usage 划分（官方协议）；缺失 Usage 时明确报错，不做静默回退
+    if "Usage" not in df.columns:
+        raise ValueError(
+            "数据集缺少 Usage 列：本项目使用官方 Training/PublicTest/PrivateTest 划分；"
+            "自定义划分清单尚未支持，请提供含 Usage 的 FER2013 CSV"
         )
-        val_df, test_df = train_test_split(
-            temp_df, test_size=0.5, random_state=42, stratify=temp_df["emotion"]
+    train_df = df[df["Usage"] == "Training"].reset_index(drop=True)
+    val_df = df[df["Usage"] == "PublicTest"].reset_index(drop=True)
+    test_df = df[df["Usage"] == "PrivateTest"].reset_index(drop=True)
+    if min(len(train_df), len(val_df), len(test_df)) == 0:
+        raise ValueError(
+            f"Usage 划分不完整: Training={len(train_df)}, "
+            f"PublicTest={len(val_df)}, PrivateTest={len(test_df)}"
         )
+    if len(train_df) + len(val_df) + len(test_df) != len(df):
+        raise ValueError("存在未归入官方划分的行（Usage 取值异常），请检查数据文件")
 
     # 获取 batch_size
     if model_name and model_name in config.get("models", {}):
-        batch_size = config["models"][model_name].get("batch_size", config["training"]["batch_size"])
+        batch_size = config["models"][model_name].get(
+            "batch_size", config["training"]["batch_size"]
+        )
     else:
         batch_size = config["training"]["batch_size"]
 
     # 数据增强
     train_transform = build_train_transform(config["augmentation"])
 
-    # 类别特定增强（如 Disgust 类额外增强）
+    # 类别特定增强（如 Disgust 类额外增强）；总开关关闭时整体停用
     class_aug_map = build_class_aug_transform(
-        config.get("augmentation", {}).get("class_specific", {})
+        config.get("augmentation", {}).get("class_specific", {}),
+        master_enabled=config.get("augmentation", {}).get("enabled", False),
     )
 
     # 统一使用 CPU 路径：多进程 worker 并行增强 + pin_memory 异步传输
@@ -250,12 +266,31 @@ def create_dataloaders(config: dict, model_name: str = None):
     val_dataset = FER2013Dataset(val_df)
     test_dataset = FER2013Dataset(test_df)
 
+    # 训练集类别计数（固定 0..num_classes-1 索引）：采样器与 CB Focal Loss 共用同一份统计
+    num_classes = config["data"]["num_classes"]
+    train_class_counts = compute_class_counts(train_df["emotion"].values, num_classes)
+    train_dataset.class_counts = train_class_counts
+    print(
+        f"训练集类别计数 (索引 0-{num_classes - 1}): "
+        f"{train_class_counts} | 合计 {sum(train_class_counts)}"
+    )
+
+    # 数据指纹（CSV SHA-256 + 各划分行号/标签哈希）：随 run_meta 记录，可复核追溯
+    train_dataset.split_fingerprint = compute_split_fingerprint(dataset_path, df)
+
     # DataLoader 配置
     dl_config = config.get("dataloader", {})
     train_workers = dl_config.get("num_workers", 0)
     pin_memory = dl_config.get("pin_memory", use_cuda)
     persistent_workers = dl_config.get("persistent_workers", False)
     prefetch_factor = dl_config.get("prefetch_factor", 2)
+
+    # num_workers=0 时 DataLoader 不接受 persistent_workers=True / prefetch_factor：
+    # 自动关闭并明确提示（Windows spawn 场景常见）
+    if train_workers <= 0:
+        if persistent_workers:
+            print("  num_workers=0：persistent_workers 自动关闭（DataLoader 不允许）")
+        persistent_workers = False
 
     # 训练 DataLoader：多进程并行增强 + 大 prefetch 缓冲吸收变换抖动
     # 更大的 prefetch_factor 让 DataLoader 预取更多批次到队列，
@@ -284,7 +319,9 @@ def create_dataloaders(config: dict, model_name: str = None):
     class_balanced = dl_config.get("class_balanced_sampling", False)
     train_sampler = None
     if class_balanced:
-        weights = _compute_sampler_weights(train_df)
+        weights = _compute_sampler_weights(
+            train_df, num_classes=num_classes, class_counts=train_class_counts
+        )
         train_sampler = torch.utils.data.WeightedRandomSampler(
             weights, num_samples=len(weights), replacement=True,
         )
@@ -298,41 +335,99 @@ def create_dataloaders(config: dict, model_name: str = None):
     val_loader = DataLoader(val_dataset, shuffle=False, **eval_loader_kwargs)
     test_loader = DataLoader(test_dataset, shuffle=False, **eval_loader_kwargs)
 
-    return train_loader, val_loader, test_loader, CLASS_NAMES
+    return train_loader, val_loader, test_loader, class_names
 
 
 # ============================================================
 # Class-balanced sampler 权重计算
 # ============================================================
-def _compute_sampler_weights(train_df: pd.DataFrame) -> list:
+def compute_split_fingerprint(csv_path, df: pd.DataFrame) -> dict:
     """
-    为 WeightedRandomSampler 计算每个样本的采样权重。
-    使用逆频率加权：少样本类别获得更高采样概率。
+    计算数据指纹：CSV 文件 SHA-256 + 官方各划分的（行号‖标签）哈希。
+
+    划分哈希算法：sha256( 行号 int64-LE 字节 ‖ 标签 int64-LE 字节 )；
+    行号 = CSV 数据行顺序（表头后第 i 行，从 0 计）。
+    结果用于 run 元数据记录，可复核训练所用划分与数据文件未变。
+    """
+    h = hashlib.sha256()
+    with open(csv_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    fingerprint: dict[str, Any] = {
+        "protocol": "official-usage",
+        "csv_path": str(csv_path),
+        "csv_sha256": h.hexdigest(),
+        "splits": {},
+    }
+    for split in ("Training", "PublicTest", "PrivateTest"):
+        mask = (df["Usage"] == split).to_numpy()
+        idx = np.nonzero(mask)[0].astype(np.int64)
+        labels = df.loc[mask, "emotion"].to_numpy(dtype=np.int64)
+        sh = hashlib.sha256(idx.tobytes() + labels.tobytes()).hexdigest()
+        fingerprint["splits"][split] = {
+            "rows": int(mask.sum()),
+            "row_label_hash_sha256": sh,
+        }
+    return fingerprint
+
+
+def compute_class_counts(labels, num_classes: int) -> list:
+    """
+    按 0..num_classes-1 的固定索引统计各类别样本数。
+
+    - 保持类别索引不变：某类缺失记为 0，不压缩位置（防止类别错位）
+    - 标签越界时明确报错
+
+    Args:
+        labels: 标签数组（numpy 或 list）
+        num_classes: 类别总数（本项目固定为 7）
+
+    Returns:
+        长度 = num_classes 的计数列表
+    """
+    labels = np.asarray(labels)
+    if labels.size:
+        lo, hi = int(labels.min()), int(labels.max())
+        if lo < 0 or hi >= num_classes:
+            raise ValueError(f"标签值超出 [0, {num_classes}) 范围: min={lo}, max={hi}")
+    return [int((labels == i).sum()) for i in range(num_classes)]
+
+
+def _compute_sampler_weights(train_df: pd.DataFrame, *, num_classes: int,
+                             class_counts: list) -> list:
+    """
+    为 WeightedRandomSampler 计算每个样本的采样权重（逆频率加权）。
+
+    与 CB Focal Loss 使用同一份 class_counts（compute_class_counts 统计，
+    经 train_loader.dataset.class_counts 传入 Trainer），保证两种机制口径一致。
+    零计数类别明确报错（不压缩类别索引、不静默跳过）。
 
     Args:
         train_df: 训练集 DataFrame（含 'emotion' 列）
+        num_classes: 类别总数（固定索引 0..num_classes-1）
+        class_counts: compute_class_counts 的统计结果
 
     Returns:
         每个样本的权重列表，顺序与 train_df 一致
-
-    与 Focal Loss 的关系：
-        - sampler 修正数据分布 → 每个 epoch 看见更多少样本
-        - Focal Loss 修正梯度分布 → 少样本的 loss 贡献更大
-        - 两者互补，可同时启用
     """
-    class_counts = train_df["emotion"].value_counts().sort_index()
-    n_total = len(train_df)
-    n_classes = len(class_counts)
-    class_weights = n_total / (n_classes * class_counts.values)
+    zero_classes = [i for i, c in enumerate(class_counts) if c <= 0]
+    if zero_classes:
+        raise ValueError(
+            f"训练集类别索引 {zero_classes} 样本数为 0，无法计算逆频率采样权重；"
+            "请检查数据划分或关闭 class_balanced_sampling"
+        )
+    labels = train_df["emotion"].values
+    counts = np.asarray(class_counts, dtype=np.float64)
+    class_weights = counts.sum() / (num_classes * counts)
     # 每个样本的权重 = 其类别的逆频率权重
-    weights = class_weights[train_df["emotion"].values].tolist()
-    return weights
+    per_sample = class_weights[labels]
+    return [float(w) for w in per_sample]
 
 
 # ============================================================
 # 类别权重计算（保留为工具函数）
 # ============================================================
-def compute_class_weights(train_df, CLASS_NAMES, device):
+def compute_class_weights(train_df, class_names, device):
     """根据训练集计算逆频率类别权重
 
     ⚠️ 已弃用: 训练器改用 Focal Loss 处理类别不平衡，不再需要此函数。
@@ -343,5 +438,5 @@ def compute_class_weights(train_df, CLASS_NAMES, device):
     )
     emotion_counts = train_df["emotion"].value_counts().sort_index()
     total = len(train_df)
-    class_weights = total / (len(CLASS_NAMES) * emotion_counts.values)
-    return torch.FloatTensor(class_weights).to(device)
+    class_weights = total / (len(class_names) * emotion_counts.values)
+    return torch.as_tensor(class_weights, dtype=torch.float32).to(device)

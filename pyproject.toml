@@ -2,7 +2,7 @@
 name = "fer2013-emotion-recognition"
 version = "0.1.0"
 description = "FER2013 人脸情感识别 — PyTorch 训练 + Streamlit 推理"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "torch>=2.0",
     "torchvision>=0.15",
@@ -33,15 +33,25 @@ dev = [
 include = ["models*", "utils*", "data*", "training*", "inference*", "tools*", "tests*"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 100
+
+[tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
 
-[tool.ruff.per-file-ignores]
-"notebooks/*.ipynb" = ["E402", "F401"]
+[tool.ruff.lint.per-file-ignores]
+# Notebook：import 分散在各 cell，且存在展示性 import
+"*.ipynb" = ["E402", "F401"]
+# 自包含入口/工具/测试：先设置项目根 sys.path 再导入项目模块（支持从任意 cwd 直接运行）
+"training/train.py" = ["E402"]
+"tools/*.py" = ["E402"]
+"tests/*.py" = ["E402"]
+# torch.nn.functional 的社区惯例别名 F / 自包含脚本模式
+"inference/*.py" = ["E402", "N812"]
+"utils/losses.py" = ["N812"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -54,7 +64,7 @@ Documentation = "https://github.com/BernardW18/fer2013-emotion-recognition#readm
 
 [build-system]
 requires = ["setuptools>=64"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

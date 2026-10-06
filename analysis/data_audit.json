@@ -1,0 +1,57 @@
+{
+  "checked_on": "2026-10-07T02:15:14.870446",
+  "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+  "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+  "csv_sha256_matches_frozen": true,
+  "split_counts": {
+    "Training": 28709,
+    "PublicTest": 3589,
+    "PrivateTest": 3589
+  },
+  "duplicate_pixel_stats": {
+    "duplicate_groups": 1516,
+    "excess_rows_beyond_unique": 1853,
+    "label_conflict_groups": 57
+  },
+  "cross_split_overlap": {
+    "Training__PublicTest": {
+      "unique_image_hashes": 270,
+      "rows_in_second_split": 280
+    },
+    "Training__PrivateTest": {
+      "unique_image_hashes": 278,
+      "rows_in_second_split": 288
+    },
+    "PublicTest__PrivateTest": {
+      "unique_image_hashes": 43,
+      "rows_in_second_split": 44
+    }
+  },
+  "sensitivity_analysis": {
+    "note": "仅作敏感性分析：不改变官方划分结果；本表不代表去重重训结果，不能与官方成绩混用",
+    "excluded_metric": "PrivateTest 中与 Training 像素完全相同的记录",
+    "excluded_rows_in_private_test": 288,
+    "results": {
+      "mini_cnn": {
+        "n_after_exclusion": 3301,
+        "accuracy": 0.6104210845198424,
+        "macro_f1": 0.5394550399091805
+      },
+      "vgg_lite": {
+        "n_after_exclusion": 3301,
+        "accuracy": 0.6395031808542866,
+        "macro_f1": 0.6029818242288487
+      },
+      "micro_resnet": {
+        "n_after_exclusion": 3301,
+        "accuracy": 0.6507119054831869,
+        "macro_f1": 0.6042017114102615
+      }
+    }
+  },
+  "method": {
+    "pixel_hash": "sha256(规范化像素字符串：空白拆分后单空格连接)",
+    "duplicate_definition": "规范化像素字符串完全相同",
+    "scope_note": "仅检查完全重复；不覆盖近重复或人员身份重叠"
+  }
+}

@@ -9,8 +9,7 @@ __all__ = ["ACTIVATION_REGISTRY", "get_activation"]
 
 import torch.nn as nn
 
-
-ACTIVATION_REGISTRY = {
+ACTIVATION_REGISTRY: dict[str, type[nn.Module]] = {
     "relu": nn.ReLU,
     "leaky_relu": nn.LeakyReLU,
     "elu": nn.ELU,
