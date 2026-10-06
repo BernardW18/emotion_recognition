@@ -27,8 +27,7 @@ __pycache__/
 .ipynb_checkpoints/
 
 # 项目分析报告
-codebase_analysis_report.md
-modification_plan.md
+docs/
 
 # 虚拟环境
 venv/

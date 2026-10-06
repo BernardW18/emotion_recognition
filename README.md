@@ -131,8 +131,9 @@ pip install -e ".[dev]"
 
 ### 3. 训练模型
 
-**当前正式重训第一阶段：CE 基线。** 已冻结 `comparison-ce-v1`，三个模型各执行
-seeds=42/43/44，共9次；启动命令、预算与续训规则见
+**当前正式重训第一阶段：CE 基线已完成。** 协议 `comparison-ce-v1`，三个模型各执行
+seeds=42/43/44，共9次，全部正式准入通过；结果见
+[CE第一阶段实验结果](analysis/ce_stage1/RESULTS.md)。启动命令、预算与续训规则见
 [比较协议第7节](docs/comparison_protocol_draft.md#7-ce-第一阶段启动清单2026-10-07)。
 必须显式指定 `--config configs/baseline_config.yaml --purpose formal`；
 下面的通用命令默认属于流程验证，不能代替本次正式CE实验。
@@ -203,6 +204,24 @@ streamlit run inference/app.py    # 或 python run_app.py
 ---
 
 ## 模型对比
+
+### CE第一阶段正式结果（2026-10-07）
+
+共同训练预算、每模型seeds=42/43/44，共9次正式run；best按PublicTest val_acc选择。
+最终统一CPU float32评估，以下为PrivateTest均值±样本标准差（n=3；以百分数表示）。
+
+| 模型 | accuracy | macro-F1 | balanced accuracy | Disgust recall |
+|---|---:|---:|---:|---:|
+| MiniCNN | 61.98 ± 2.17 | 52.57 ± 2.89 | 52.66 ± 2.23 | 5.45 ± 4.81 |
+| VGGLite | 62.24 ± 3.29 | 50.61 ± 3.70 | 51.96 ± 2.91 | 0.00 ± 0.00 |
+| MicroResNet | 64.76 ± 0.38 | 58.76 ± 1.15 | 58.34 ± 0.87 | 29.09 ± 5.45 |
+
+这是官方划分的CE基线结果，保留跨划分重复披露。三种子波动和早停轮数均如实保留；
+其他损失/采样臂尚未执行，历史不同配置权重不作为受控对照。
+逐run结果、权重/数据指纹、逐样本预测与问题/方案/验收标准见
+[RESULTS.md](analysis/ce_stage1/RESULTS.md)及[results.json](analysis/ce_stage1/results.json)。
+
+### 历史权重评估（legacy）
 
 当前三个权重的统一评估结果（CPU float32，官方划分；权重为历史 legacy 产物，
 来源与 SHA-256 见 `inference/saved_models/export_manifest.json`）：
