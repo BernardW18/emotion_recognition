@@ -26,9 +26,15 @@ import torch
 
 from data.dataloader import create_dataloaders
 from training.checkpoint import find_resume_checkpoint
-from training.trainer import Trainer, load_config, set_seed
+from training.trainer import (
+    Trainer,
+    enforce_exact_resume_conditions,
+    load_config,
+    set_seed,
+)
 from utils.config_validation import validate_config
 from utils.model_spec import build_model_from_spec, make_spec_from_config
+from utils.stdio import ensure_utf8_stdio
 
 
 def parse_args():
@@ -59,6 +65,11 @@ def parse_args():
     )
     parser.add_argument("--diagnose", action="store_true", help="仅运行性能诊断（不训练）")
     parser.add_argument("--steps", type=int, default=10, help="诊断步数 (默认: 10，含 3 步预热)")
+    parser.add_argument(
+        "--config", type=str, default=None,
+        help="训练配置文件路径（默认 configs/training_config.yaml；"
+             "CE 基线用 configs/baseline_config.yaml）",
+    )
     parser.add_argument("--seed", type=int, default=None, help="随机种子（覆盖 config 中的 seed）")
     parser.add_argument("--lr", type=float, default=None, help="学习率覆盖")
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size 覆盖")
@@ -66,10 +77,11 @@ def parse_args():
 
 
 def main():
+    ensure_utf8_stdio()
     args = parse_args()
     model_name = args.model
 
-    config = load_config()
+    config = load_config(args.config)
 
     # ---- CLI 覆盖（应用后再集中校验，保证日志与"实际生效配置"一致）----
     if args.amp and args.no_amp:
@@ -91,6 +103,23 @@ def main():
     seed = config["seed"]
     deterministic = bool(config["training"].get("cudnn_deterministic", False))
     set_seed(seed, deterministic=deterministic)
+
+    # ---- 恢复解析（R01：先调整数据加载条件，再构建 DataLoader）----
+    resume_path = None
+    resume_conditions = None
+    if args.resume:
+        if args.resume == "auto":
+            resume_path = find_resume_checkpoint(model_name)
+            if resume_path is None:
+                print("  auto: 未找到可续训断点（training/runs/ 下无 last.pth），从头训练")
+            else:
+                print(f"  auto: 选择 {resume_path}")
+        else:
+            resume_path = Path(args.resume)
+            if not resume_path.exists():
+                raise SystemExit(f"错误: checkpoint 不存在: {resume_path}")
+    if resume_path is not None:
+        resume_conditions = enforce_exact_resume_conditions(config)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_config = config["models"][model_name]
@@ -115,22 +144,31 @@ def main():
     spec = make_spec_from_config(config, model_name)
     model = build_model_from_spec(spec)
 
-    # ---- 恢复解析 ----
-    resume_path = None
-    if args.resume:
-        if args.resume == "auto":
-            resume_path = find_resume_checkpoint(model_name)
-            if resume_path is None:
-                print("  auto: 未找到可续训断点（training/runs/ 下无 last.pth），从头训练")
-            else:
-                print(f"  auto: 选择 {resume_path}")
-        else:
-            resume_path = Path(args.resume)
-            if not resume_path.exists():
-                raise SystemExit(f"错误: checkpoint 不存在: {resume_path}")
-
     # 续训时沿用原 run 目录；新训练由 Trainer 生成新 run_id
     run_dir = resume_path.parent.parent if resume_path is not None else None
+
+    # ---- 诊断模式（R03：独立 Trainer + 临时目录；不创建/触碰正式 runs）----
+    if args.diagnose:
+        import tempfile
+
+        diagnose_dir = Path(tempfile.mkdtemp(prefix="fer2013_diagnose_"))
+        print(f"\n  诊断模式: {args.steps} 步（含 3 步预热）")
+        print(f"  隔离输出目录: {diagnose_dir}（不属于正式 runs）\n")
+        diag_trainer = Trainer(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            test_loader=test_loader,
+            config=config,
+            model_name=model_name,
+            device=device,
+            class_counts=train_loader.dataset.class_counts,
+            run_dir=diagnose_dir / "diagnose",
+            run_meta_extra={"cli_args": vars(args), "purpose": "diagnose"},
+        )
+        diag_trainer.diagnose(num_steps=max(args.steps - 3, 5))
+        diag_trainer._persist_run_meta(status="diagnose_completed")
+        return
 
     trainer = Trainer(
         model=model,
@@ -142,20 +180,13 @@ def main():
         device=device,
         class_counts=train_loader.dataset.class_counts,
         run_dir=run_dir,
-        run_meta_extra={"cli_args": vars(args)},
+        run_meta_extra={"cli_args": vars(args), "resume_conditions": resume_conditions},
     )
 
     print(f"  参数量: {trainer.total_params:,}\n")
 
     if resume_path is not None:
         trainer.load_checkpoint(resume_path)
-
-    # ---- 诊断模式 ----
-    if args.diagnose:
-        print(f"\n  诊断模式: {args.steps} 步（含 3 步预热）\n")
-        trainer.diagnose(num_steps=max(args.steps - 3, 5))
-        trainer._persist_run_meta(status="diagnose_completed")
-        return
 
     # ---- 训练 ----
     fit_start = time.time()

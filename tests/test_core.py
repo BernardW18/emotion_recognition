@@ -178,7 +178,10 @@ class TestTrainer:
                              "mixup": {"enabled": False}},
             "checkpoint": {"save_every_n_epochs": 5, "save_best": True,
                            "monitor_metric": "val_acc", "max_checkpoint_files": 5},
-            "data": {"class_names": ["A", "B", "C"], "num_classes": 3, "image_size": 48},
+            "data": {
+                "dataset_path": "data/fer2013.csv",
+                "class_names": ["A", "B", "C"], "num_classes": 3, "image_size": 48,
+            },
             "seed": 42,
         }
 

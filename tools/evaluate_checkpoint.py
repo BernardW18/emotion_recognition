@@ -14,9 +14,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.evaluation import evaluate_checkpoint  # noqa: E402
+from utils.stdio import ensure_utf8_stdio  # noqa: E402
 
 
 def main():
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(description="统一评估入口（指定 checkpoint + split）")
     parser.add_argument("--checkpoint", required=True, help="权重路径（必填，无内存状态依赖）")
     parser.add_argument("--split", default="PrivateTest",

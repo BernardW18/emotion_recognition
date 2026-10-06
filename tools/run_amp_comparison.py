@@ -46,6 +46,7 @@ from training.checkpoint import _capture_rng_state, _restore_rng_state
 from training.trainer import build_optimizer, load_config, set_seed
 from utils.losses import FocalLoss
 from utils.model_spec import build_model_from_spec, file_sha256, make_spec_from_config
+from utils.stdio import ensure_utf8_stdio
 
 PAIRS_PER_MODEL = 3
 STEP_MEASURE_STEPS = 20
@@ -235,6 +236,7 @@ def _formal_hashes() -> dict:
 
 
 def main():
+    ensure_utf8_stdio()
     config = load_config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type != "cuda":

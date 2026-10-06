@@ -6,11 +6,13 @@
 
 本轮只处理当前项目的正确性、可复现性、训练可靠性和材料表达。保留 MiniCNN、VGGLite、MicroResNet 三个现有模型以及 FER2013 数据；不提出新研究问题，不新增架构、分类头改造、其他数据集或论文迁移任务。对现有损失、采样、增强和 AMP 的检查，是为了确认项目已有功能及结论是否成立。
 
-项目已经覆盖数据分析、三个 CNN、训练、断点保存、类别不平衡处理、评估和推理演示，能够作为课程项目及入组申请的基础。当前最主要的障碍是：推理没有按训练配置构造模型，参数量表述错误，数据存在跨划分重复，实验产物不能完整追溯，早停与续训行为不可靠。修复后应以“完成并核验一个可复现的 FER2013 表情分类流程”介绍项目，明确自己的工作及结果限制。
+第一轮重构已建立统一模型规格、独立 run、显式评估和导出入口，修正了 MicroResNet 的激活加载、参数量与早停基础逻辑。本次独立审核确认 75 项测试、Ruff、mypy、依赖检查通过，Windows CUDA 可用；保存的评估与导出结果可复核。但默认持久 worker 下的精确续训、续训配置/数据约束、诊断隔离、重复 fit 与配置一致性仍有可复现问题，尚不满足“全部正确性问题已关闭”的结论。完整结果见末尾“第一轮重构独立审核”。
 
-本文中的“验收标准”是各项修复需要满足的条件。**2026-10-07 修复轮**：F01–F19 已完成代码修复、针对性验证与材料同步（状态见各项）；**未启动正式重训**（按用户决策，重训与比较实验另行安排）。P0 表示正式重训前需要完成（适用条件已全部满足），P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成。
+本文中的“验收标准”是各项修复需要满足的条件。**2026-10-07 独立审核，提交 `6d02afd117183b4ded3896a32ddbf07d0c8fa7cc`**：F05/F09/F13 部分通过并重新打开，F07/F11 的正式比较尚未执行，F07 的 CE 基线前置也未完成，F19 部分完成。**不启动正式重训、不修改模型或训练实现**；本次只更新审核文档与结构化证据。P0 表示正式重训前需要完成，P1 表示相关功能或实验结论使用前需要完成，P2 表示演示和对外材料提交前需要完成；不能把测试数量或短训练闭环代替各项验收。
 
 ## Windows CUDA 环境：已安装并验收
+
+本节保留上一轮环境与三模型最小更新的核验记录；本次独立审核已复核环境并运行 75 项测试，新增结果见末尾与证据文件的新字段。历史 36 项测试和四批次 GPU 更新结果不冒充本次正式训练。
 
 本项目统一使用 Windows 虚拟环境：`D:\Document\Unniversity\emotion_recognition\.venv\Scripts\python.exe`。本轮已检查用户安装后的实际环境；后续 Python 操作继续使用这个解释器。Notebook 的 `Emotion Recognition (.venv)` 内核也已核对指向此路径。`D:\AI` 的 WSL 约定不扩展到本项目。
 
@@ -42,7 +44,7 @@ AMP 使用默认 GradScaler 初始 scale=65,536；检查中发生少量缩放梯
 
 [requirements-review-lock.txt](requirements-review-lock.txt) 已更新为实际 CUDA 环境快照，使用 cu130 包源。证据文件的 `runtime_environment` 保留此前完整数据 CPU 评估的环境；新的 `cuda_environment` 记录本轮 GPU 检查，旧下载交接仅作为历史记录保留。此前 CPU 结果表不会因安装 CUDA 自动变成 GPU 评估结果。
 
-当前不需要重复安装。若以后重建本项目 Windows 环境，可使用下面的固定版本命令；完整项目的可编辑安装仍需先修复 F04：
+当前不需要重复安装。F04 的构建后端已修正；修复轮记录了干净 Windows venv 的安装验证，本次独立审核未重复下载或新建环境。若以后重建本项目 Windows 环境，可使用下面的固定版本命令，再按 README 安装项目与开发依赖：
 
 ```powershell
 # 仅在重建环境时安装；本轮已安装并验证。
@@ -150,7 +152,9 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 每个结果表和导出模型能反查唯一 run、完整配置、划分及权重 SHA-256；运行失败也保留启动配置和状态。
 - 选择旧权重演示时显示其真实来源；无完整历史配置的旧结果明确标注信息缺失。
 
-**状态：** 已修复（2026-10-07）。新增 training/runs/<模型>/<run_id>/ 目录结构（config_effective.yaml、run_meta.json 含 CLI/seed/git/环境/数据指纹、history.json、checkpoints/{last,best,epoch_*,interrupted_*}）；导出经 tools/export_model.py 写 export_manifest.json（run、SHA-256、spec、指标），默认不覆盖同名文件；旧目录整体保留为 legacy。证据：run 隔离测试（tests/test_training_pipeline.py）；短训练闭环（run 20261007_022921_seed42，训练→续训→导出→评估全程可追溯）。
+**状态：** 部分通过，独立审核重新打开（R02）：新建 run 的隔离测试通过，但不同配置/数据仍可续写原 run，恢复来源记录不完整。
+
+**修复轮原记录（历史，当前状态以上述独立复核为准）：** 已修复（2026-10-07）。新增 training/runs/<模型>/<run_id>/ 目录结构（config_effective.yaml、run_meta.json 含 CLI/seed/git/环境/数据指纹、history.json、checkpoints/{last,best,epoch_*,interrupted_*}）；导出经 tools/export_model.py 写 export_manifest.json（run、SHA-256、spec、指标），默认不覆盖同名文件；旧目录整体保留为 legacy。证据：run 隔离测试（tests/test_training_pipeline.py）；短训练闭环（run 20261007_022921_seed42，训练→续训→导出→评估全程可追溯）。
 
 ### F06 · P0 · 类别计数错误，可能生成错误损失权重
 
@@ -178,7 +182,9 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 每项“提升某类表现”的结论对应只改变一个已有选项的可追溯对照；没有对照的组合只称当前设置。
 - 类别报告包括 PrivateTest Disgust 的 55 张支持数；说明一张样本对应约 1.82 个百分点 recall 变化。允许结果无改善，不能以挑选有利 seed 的方式验收。
 
-**状态：** 待重训（前置已就绪）。统一评估入口与比较协议草案 docs/comparison_protocol_draft.md 已完成（含 Focal/CB-Focal 预注册口径、只用 PublicTest 做选择、≥3 seeds、macro-F1 主指标）；比较方案冻结与 Focal/CB-Focal 重训按用户决策另行安排。
+**状态：** 待补齐前置与正式实验（R08）：尚无可由 CLI/YAML 启动的普通 CE 基线，比较预算未冻结；不能标记为前置已全部就绪。
+
+**修复轮原记录（历史，当前状态以上述独立复核为准）：** 待重训（前置已就绪）。统一评估入口与比较协议草案 docs/comparison_protocol_draft.md 已完成（含 Focal/CB-Focal 预注册口径、只用 PublicTest 做选择、≥3 seeds、macro-F1 主指标）；比较方案冻结与 Focal/CB-Focal 重训按用户决策另行安排。
 
 ### F08 · P0 · 验证损失早停条件无法触发
 
@@ -207,7 +213,9 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - epoch、history 长度和训练状态一致；中途文件明确为 partial，自动恢复选择最新完整 last，不意外退回最佳分数对应的旧 epoch。
 - 确定性开关在 Trainer 初始化与 fit 后仍有效；损坏/不兼容断点明确报错，保存失败不破坏上一份可用断点。
 
-**状态：** 已修复（2026-10-07）。checkpoint 格式 v2：RNG（python/numpy/torch/cuda）、AMP scaler、best（值/epoch）、早停计数、累计训练时长全量保存与恢复；原子写（失败不破坏上一份断点）；中断断点标记 partial；旧格式断点明确拒绝（不静默降级）。证据：恢复与连续训练逐批次一致（批次顺序哈希、参数 atol=1e-6/rtol=1e-5、history/best/计数一致）；损坏/保存失败/中断用例；真实闭环 resume 验证（短训练 run 续训成功，累计用时恢复）。
+**状态：** 部分通过，独立审核重新打开（R01/R03/R04）：单进程恢复回归通过，持久 worker 恢复不等价、诊断会修改正式状态，同实例重复 fit 的轮号/断点错误。
+
+**修复轮原记录（历史，当前状态以上述独立复核为准）：** 已修复（2026-10-07）。checkpoint 格式 v2：RNG（python/numpy/torch/cuda）、AMP scaler、best（值/epoch）、早停计数、累计训练时长全量保存与恢复；原子写（失败不破坏上一份断点）；中断断点标记 partial；旧格式断点明确拒绝（不静默降级）。证据：恢复与连续训练逐批次一致（批次顺序哈希、参数 atol=1e-6/rtol=1e-5、history/best/计数一致）；损坏/保存失败/中断用例；真实闭环 resume 验证（短训练 run 续训成功，累计用时恢复）。
 
 ### F10 · P0 · 最终评估依赖内存状态，缺失划分会静默用全数据
 
@@ -235,7 +243,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - 表格有各次结果、均值/样本标准差、实际 epoch/更新步数/用时、训练方案和 run/权重标识；未完成的运行明确列出，不能静默排除。
 - 同表使用同一评估协议和指标；accuracy、Macro-F1 及类别结果联合讨论。排序可以改变、精度可以下降，验收要求实验可信，不要求超过某个分数。
 
-**状态：** 待重训（前置已就绪，同 F07）。3 模型 × 3 seeds 独立结果与统一比较待重训（按用户决策暂缓）；统一评估与比较协议草案已就绪。
+**状态：** 正式比较未执行，前置仍需补齐（R08，同 F07）。统一评估和协议草案已存在；实际训练预算尚未冻结，应先补修 R01–R07、确定各模型有效配置与执行轮数，再开展 3 模型 × 3 seeds 比较。
 
 ### F12 · P1 · AMP 单步加速被推广为完整训练加速
 
@@ -263,7 +271,9 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - val_acc 选择最大值、val_loss 选择最小值；save_best=False 时不导出 best；augmentation.enabled=False 时普通与类别专属随机增强均关闭。
 - Windows 下 workers=0 与一个非零设置（例如 4）都能读取训练 batch；workers=0 不触发 persistent_workers/prefetch 参数错误，关闭后进程正常退出。
 
-**状态：** 已修复（2026-10-07）。新增 utils/config_validation.py 集中校验（未知键/非法值/仅 48×48/patience 语义/threshold>1/use_se 支持范围），启动前报错；checkpoint.save_best 与 monitor_metric 实际生效（val_loss 时按最小值保存）；workers=0 自动关闭 persistent/prefetch；类别特定增强受总开关控制；CLI 覆盖后统一校验并记录。证据：tests/test_config_validation.py（9 项）。
+**状态：** 部分通过，独立审核重新打开（R06/R07）：CLI 校验和 workers=0 兼容已通过；MixUp 不受总开关控制，Notebook/API 绕过校验，NaN 数值未拒绝。
+
+**修复轮原记录（历史，当前状态以上述独立复核为准）：** 已修复（2026-10-07）。新增 utils/config_validation.py 集中校验（未知键/非法值/仅 48×48/patience 语义/threshold>1/use_se 支持范围），启动前报错；checkpoint.save_best 与 monitor_metric 实际生效（val_loss 时按最小值保存）；workers=0 自动关闭 persistent/prefetch；类别特定增强受总开关控制；CLI 覆盖后统一校验并记录。证据：tests/test_config_validation.py（9 项）。
 
 ### F14 · P1 · 梯度累积尾部不足一组时被缩小
 
@@ -333,7 +343,9 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - README badge 指向真实存在的工作流和仓库；若没有 CI，材料不宣称 CI 已通过。普通 CPU CI 不宣称已验证 CUDA 训练。
 - 测试前后原数据、正式日志和导出权重哈希不变；允许用临时小数据测试正确性，不把基础测试当作完整重训复现。
 
-**状态：** 已修复（2026-10-07）。补 data/training/inference 的 __init__.py 统一包边界后 mypy 真正运行（46 → 0 错误）；ruff 全绿（少量 per-file 忽略均有局部理由）；测试 75 项全部通过（核心 36 + 训练管线 18 + 推理 8 + 应用 4 + 配置校验 9）；README 移除失效 CI badge（保持无 CI，按用户决策），仓库链接统一；测试输出隔离于 tmp_path，不污染正式 runs。
+**状态：** 现有质量检查通过，覆盖仍须补齐：独立复跑 75 项测试、Ruff、mypy 全部通过；R01–R07 的实际入口/状态边界尚无对应有效回归，不能据测试数量宣布全部正确。
+
+**修复轮原记录（历史，当前状态以上述独立复核为准）：** 已修复（2026-10-07）。补 data/training/inference 的 __init__.py 统一包边界后 mypy 真正运行（46 → 0 错误）；ruff 全绿（少量 per-file 忽略均有局部理由）；测试 75 项全部通过（核心 36 + 训练管线 18 + 推理 8 + 应用 4 + 配置校验 9）；README 移除失效 CI badge（保持无 CI，按用户决策），仓库链接统一；测试输出隔离于 tmp_path，不污染正式 runs。
 
 ### F19 · P2 · 对外材料有不可比或无证据表述，个人贡献不明确
 
@@ -369,8 +381,8 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 | 阶段 | 执行内容 | 阶段状态（2026-10-07 修复轮后） |
 |---|---|---|
 | 1 · 环境 | F20 CUDA、F04 安装入口 | F20 已验收；F04 已修复（干净 venv 安装验证通过，含「先升级 pip」前置条件） |
-| 2 · 正确性 | F01、F05、F06、F08、F09、F10、F13；F14 | 已全部修复；关键回归（75 项测试）通过，run 完全隔离 |
-| 3 · 数据与口径 | F02、F03，冻结 F07/F11 比较方案 | F02/F03 已修复（披露完成、dedup-v1 草案未实施）；F07/F11 比较协议草案已备，待冻结后重训 |
+| 2 · 正确性 | F01、F05、F06、F08、F09、F10、F13；F14 | 75 项现有测试通过；F05/F09/F13 仍需按 R01–R07 补修与回归，未全部验收 |
+| 3 · 数据与口径 | F02、F03，冻结 F07/F11 比较方案 | 参数/重复披露已核验；CE 基线与比较预算尚未齐备（R08）；dedup-v1 尚未实施 |
 | 4 · 当前模型重训 | 现有三模型；按需要验证既有不平衡选项与 AMP（F07/F11/F12） | **未执行（按用户决策暂缓）**；F12 速度基准已重做 |
 | 5 · 材料提交 | F15–F19 | F15–F18 已修复；F19 代码侧材料完成，报告/PPT 未同步（用户决策） |
 
@@ -380,7 +392,7 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 
 ## 本轮交付及证据边界
 
-本轮交付为本评估文档、证据摘要及已验收的 Windows CUDA 环境快照。用户已安装 CUDA 版 PyTorch，本轮完成环境和最小训练能力检查。已移除此前分类头压缩、低样本新问题、其他数据集以及论文迁移路线。代码修复、重训、课程报告/PPT/README 的内容同步仍是明确待办。
+此前环境核验交付了本评估文档、证据摘要与 Windows CUDA 环境快照；第一轮重构随后补充了代码、工具与 README。本次独立审核更新同一文档及证据文件，不修改模型、训练代码、正式数据和权重。正式重训、剩余正确性修复及课程报告/PPT/个人贡献材料仍待完成；继续限定在现有三个模型与 FER2013 项目内。
 
 之前的证据包括：完整 CSV 检查、三个现有权重的 CPU 评估、错误激活加载对照、续训与早停探针、36 项测试、Ruff/mypy 检查、无上传图片的应用启动及三个 Grad-CAM 基础检查。现有导出权重与各自 global_best.pth 的 SHA-256 一致。没有完成从头训练复现，也没有验证真实生活照交互或完整 GPU 性能。本轮 CUDA 检查单独记录于 `cuda_environment`，覆盖真实张量运算、torchvision CUDA 运算及三模型 FP32/AMP 更新；不覆盖上述历史完整数据评估结果，也未验证完整训练性能。
 
@@ -409,3 +421,161 @@ CSV 有 35,887 行，官方 Training/PublicTest/PrivateTest 分别为 28,709/3,5
 - **明确未做**（按用户决策或依赖重训）：3 模型 × 3 seeds 正式重训；
   Focal/CB-Focal 比较（协议草案待冻结）；dedup-v1 实施与去重重训；
   课程报告 DOCX / PPT 同步；CI 恢复（保持无 CI）。
+
+## 第一轮重构独立审核（2026-10-07）
+
+### 结论与已通过事项
+
+**结论：基础工程重构通过，完整验收暂不通过。** 当前项目可以继续补修和小规模流程验证；尚不能将“默认配置精确续训”或“三模型公平比较已完成”作为已验证成果。新建 CLI run 的普通路径已有闭环证据，但不能据此覆盖 Notebook、跨配置恢复、多 worker 或重复 fit 的不同路径。
+
+本次审核针对提交 `6d02afd`。所有 Python 使用本项目 Windows `.venv\Scripts\python.exe`，临时探针与训练输出放系统临时目录；保留的证据位于 `PROJECT_REVIEW_EVIDENCE.json` 的 `first_refactor_independent_audit`。本次未下载依赖、未执行正式 FER2013 重训、未重新运行完整 AMP 性能基准。
+
+| 独立检查 | 结果与边界 |
+|---|---|
+| pytest | 75 passed，7.71 s；1 条 Grad-CAM backward hook 提示，无失败或跳过；测试线程设为 4 |
+| Ruff / mypy | Ruff 通过；mypy 32 个源文件无问题 |
+| 环境 / 依赖 | Python 3.10.11；torch 2.14.1+cu130；torchvision 0.29.1+cu130；CUDA 13.0；RTX 5070 Ti Laptop 实际矩阵运算、pip check、Notebook 内核路径通过 |
+| 模型/推理 | 现有回归检查确认 MicroResNet 按 GELU 加载、48×48 预处理一致、Grad-CAM 基础行为正常；三模型参数计数与效率结果一致 |
+| 已保存评估 | 6 组 legacy + 1 组短训练结果复算通过；accuracy/macro-F1/balanced accuracy 完全一致，ECE/NLL 差异 <1e-4；本次没有重新做全部样本模型前向 |
+| 导出清单 | 4 份导出权重 SHA-256 与清单一致；legacy 的来源不完整性仍保留 |
+| 数据披露 | 重复组 1,516，超出唯一像素记录 1,853，冲突组 57；Training 与 PublicTest/PrivateTest 重叠 280/288 条；敏感性分析复跑与现文档一致 |
+| 原产物保护 | 原 CSV、历史日志/断点、已有导出权重/清单及真实 runs 共 40 个文件在审核前后逐文件校验；结果见证据文件 |
+
+R01–R07 是本次复现的正确性返修项；R08 是正式比较的未完成前置；R09 是材料与工具使用问题。下列 P1 均应在使用相应功能或开展正式比较前完成，F05/F09/F13 原 P0 条件因此尚未关闭。
+
+### R01 · P1 · 持久 worker 下恢复不等价于连续训练（F09 重新打开）
+
+**位置：** [data/dataloader.py](D:/Document/Unniversity/emotion_recognition/data/dataloader.py:325)、[training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:191)、`tests/test_training_pipeline.py::test_resume_matches_continuous`。
+
+**实测与影响：** 默认 YAML 使用 `num_workers=4, persistent_workers=true`，但恢复一致性测试只覆盖 `num_workers=0`。本次在真实 MiniCNN、14 个固定合成样本、WeightedRandomSampler、2 个持久 worker、关闭增强的最小条件下比较“连续 2 轮”和“1 轮后重建 Trainer 恢复再 1 轮”：第二轮标签顺序不同，参数最大差值 **0.00748777**，验证 loss 为 **1.41245735 / 1.41973412**。这说明仅恢复父进程 RNG 不足以覆盖持久迭代器的恢复语义；真实增强还有 worker 内 RNG 状态。2-worker 探针证明该机制有缺陷，本次未额外跑完整 4-worker FER2013 训练。
+
+**修复方案：** 先明确精确恢复的支持范围。可先在该模式强制 `num_workers=0` 并记录，不再对默认持久 worker 作无条件承诺。若保留多进程，至少为 sampler 与 DataLoader 配置独立 generator 并保存/恢复其状态，按 epoch 重建 worker 或实现可复算的 epoch/sample 增强种子，避免新迭代器额外消耗采样 RNG；不能只保存主进程 `torch.get_rng_state()`。性能模式与精确模式的区别写入 run。
+
+**验收标准：** 在宣称支持的 workers=0/2/4、持久开关、增强开关及加权采样组合下，以同 seed 比较连续与恢复训练；逐批原始行号/样本 occurrence 和增强后输入一致，参数 `atol=1e-6, rtol=1e-5`、history、LR、scaler、best 与早停计数一致。无法保证的组合启动时明确拒绝精确恢复或标注为非精确模式；不得只检查类别标签哈希。
+
+**状态：** 已修复（2026-10-07）。明确「精确恢复」实测支持范围 = `num_workers=0`：恢复时自动将数据加载调整为单进程并记录于 `run_meta.resume_events`（`resume_conditions` 含原值/调整值与范围说明）；`load_checkpoint` 对多进程 loader 明确拒绝。回归测试升级为逐批「增强后输入张量哈希 + 标签序列」比对，覆盖 普通/增强/加权采样/二者组合 四种组合（连续 vs 恢复逐批一致）；真实 CLI 闭环复核（run 20261007_031251_seed42：workers 4→0 强制并记录、恢复至第 2 轮）。多进程数据管线下的恢复一致性明确不作承诺。
+
+### R02 · P1 · 更换训练配置或数据仍可续写原 run（F05/F09 重新打开）
+
+**位置：** [training/checkpoint.py](D:/Document/Unniversity/emotion_recognition/training/checkpoint.py:324)、[training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:449)。
+
+**实测与影响：** 加载只比较 `model_spec`。本次将 Focal 换为 CB-Focal，同时改变数据张量和数据指纹，原断点仍成功加载。实际 criterion 是 `CBFocalLoss`、数据指纹变为 `b…b`，同一 run 的 `config_effective.yaml` 仍写 `loss_type: focal`、`run_meta.data.csv_sha256` 仍是 `a…a`。日志可追溯性失效；更换 monitor、batch、增强、AMP 或调度器也未受同等约束。
+
+**修复方案：** 在 checkpoint 保存训练协议/有效配置与数据指纹，在恢复前比对损失、采样、增强、batch/累积、优化器/调度器、monitor、精度模式及 CSV/划分指纹。允许变更的字段使用明确白名单（如本次追加轮数）；改变训练策略应建立新 run 并记录父断点，不能继续称为原 run 的精确恢复。校验通过后再写恢复事件，每次事件记录当次 CLI/config/git/environment；失败不得先改写原 run 元数据。
+
+**验收标准：** 同配置/数据可恢复；逐项修改 loss、sampler、monitor、batch、增强、调度器或 CSV 字节/划分时，在更新权重和原 run 文件前报错。若提供显式派生运行，必须有新 run_id、实际生效配置与 parent checkpoint SHA；旧 run 所有文件哈希保持不变。
+
+**状态：** 已修复（2026-10-07）。checkpoint 保存 `training_protocol`（损失/采样/增强/批/累积/优化器/调度器/monitor/精度/数据指纹）；恢复前逐项比对（在加载权重之前），差异逐条列出并拒绝；恢复事件仅在全部校验通过后写入（含当次 CLI/git/环境/config_effective SHA-256）；失败时原 run 文件逐字节不变、模型未被加载、无事件写入（回归测试覆盖 9 个变异场景 + 产物不变性）。旧断点（无协议记录）标记「协议未验证」并警告，不冒称精确。
+
+### R03 · P1 · Notebook 诊断污染正式训练状态（F09/F12）
+
+**位置：** [training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:533)、[02_train_baseline.ipynb](D:/Document/Unniversity/emotion_recognition/training/notebooks/02_train_baseline.ipynb:159)。
+
+**实测与影响：** MiniCNN Notebook 在同一个 `trainer` 上执行 `diagnose()` 后再 `fit()`；诊断执行真实更新。本次 `diagnose(num_steps=1)` 包含 3 步预热，累计 **4 次优化器更新**，参数最大变化 **0.49847969**，RNG 改变，但 history 仍为 0 轮。这样正式训练不再从声明的初始化/恢复状态起步；从断点恢复后运行该单元也会产生未记录的额外更新。重写后的 AMP 配对工具已用副本预热，不能替代此 Notebook 路径的隔离。
+
+**修复方案：** 诊断使用独立模型、优化器、scaler 和独立数据加载器；完成后恢复主运行 RNG，不能消费正式持久 worker 的队列/增强状态。也可从 Notebook 移除同实例诊断，改为独立工具，再重新构建正式 Trainer。保留 K>1 时的真实分组 step 语义，或明确其诊断口径并禁止拿它外推正式训练。
+
+**验收标准：** 诊断前后正式模型参数/BN buffer、优化器、scheduler、scaler、RNG、loader/sampler 状态及 run 文件逐项不变；同 seed 的“直接 fit”与“先诊断再 fit”得到同批输入及同等训练结果；FP32/AMP 和从 last 恢复的路径均覆盖。
+
+**状态：** 已修复（2026-10-07）。`diagnose()` 完全隔离：独立模型/优化器/GradScaler/数据加载器副本，结束后恢复 RNG（torch/numpy/python）；正式模型参数、BN buffer、优化器、history、run 文件逐项不变（回归测试）；「先诊断再 fit」与「直接 fit」逐批输入与结果一致（回归测试）；`--diagnose` CLI 改为独立临时目录运行（不创建/触碰正式 runs）；K>1 保留组末 step 语义。
+
+### R04 · P1 · 同一实例重复 fit 会重复轮号并覆盖定期断点（F09）
+
+**位置：** [training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:898)，三个训练 Notebook 的“可反复调用续训”说明。
+
+**实测与影响：** `fit()` 结束没有推进 `start_epoch` 或累计会话用时。连续调用两次 `fit(1)` 后，history 与 last.epoch 均为 2，但 `start_epoch=1`、`run_meta.final_epoch=1`，只有 `epoch_0001.pth`，第二次覆盖第一轮定期断点。best_epoch、保存频率和累计时长也可能错误。重新创建 Trainer 并 load 的测试不能覆盖同实例反复运行 Notebook 单元。
+
+**修复方案：** 以已完成 history 轮数统一推进下一轮起点，正常结束、早停和中断分别处理；每个会话结束更新累计训练时长。保留本会话起点的局部变量用于输出，避免循环内修改起点影响迭代。partial 中断须先回到完整 last 状态再精确继续，不能在已部分更新的模型上冒称完整 epoch 恢复。
+
+**验收标准：** 在同实例上 `fit(1); fit(1)` 与 `fit(2)` 的批次/参数/history 一致，轮号为 1、2，`start_epoch=3`、last.epoch 与 final_epoch 为 2，定期断点分别保存为 0001/0002；累计时长递增。追加测试早停后再次 fit、load 后分段 fit 和中途中断。
+
+**状态：** 已修复（2026-10-07）。fit 收尾按 history 长度推进 `start_epoch` 并累计会话时长；同实例 `fit(1);fit(1)` 与 `fit(2)` 的逐批输入/参数/history 一致、轮号 1/2、`start_epoch=3`、定期断点 0001/0002 分别保存（各自 epoch 正确）、`final_epoch=2`（回归测试）；早停后再次 fit 从正确轮号继续（回归测试）。
+
+### R05 · P1 · Trainer 默认设备选择后模型仍留在 CPU
+
+**位置：** [training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:299)。
+
+**实测与影响：** `model.to(device)` 先于默认设备解析。GPU 主机上省略 `device` 时，`self.device=cuda`、模型参数却在 CPU，首个训练批次报 `Input type (torch.cuda.FloatTensor) and weight type (torch.FloatTensor) should be the same`。CLI 与现 Notebook 显式传设备，正常路径不受此项影响；模块文档中的默认调用会失败。
+
+**修复方案：** 先规范化并解析 `self.device = torch.device(...)`，再 `model.to(self.device)`，随后创建 optimizer/scaler；所有入口共用此顺序。
+
+**验收标准：** CUDA 主机上省略 device、显式 cuda/cpu 以及无 CUDA 时的默认路径均能完成有限的前向、反向与有效参数更新；模型、输入和优化器状态在正确设备上。GPU 用例应检查实际运算，不能仅 mock 可用性。
+
+**状态：** 已修复（2026-10-07）。设备解析先于 `model.to(device)`；省略 device（CUDA 主机）、显式 cuda/cpu、无 CUDA 默认路径均有回归覆盖（GPU 用例验证真实前向/反向与有效参数更新）。
+
+### R06 · P1 · 增强总开关不能关闭 MixUp（F13 重新打开）
+
+**位置：** [training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:345)。
+
+**实测与影响：** 合法配置 `augmentation.enabled=false`、`mixup.enabled=true` 通过校验，却得到 `trainer.mixup_enabled=true`；4 个训练批次实际调用 MixUp **4 次**。关闭增强的对照仍有批级增强，实际设置与声明不符。类别专属增强的总开关修复不能覆盖这个分支。
+
+**修复方案：** 有效 MixUp 开关由总开关与子开关共同计算；在 run 记录有效增强设置。总开关关闭时禁用所有图像/类别/批级增强，或对矛盾配置明确报错，统一 CLI 与 Notebook 语义。
+
+**验收标准：** 覆盖总开关 × MixUp 开关的四种组合；总开关 false 时实际调用数为 0、输入/标签无混合；总开关 true 且 MixUp true 才生效。类别专属增强与普通增强做同样组合检查，配置快照与运行日志一致。
+
+**状态：** 已修复（2026-10-07）。有效 MixUp 开关 = 总开关 AND 子开关；run_meta 记录 `effective_augmentation`；四种组合的「开关值 + 实际调用次数」回归测试通过；类别专属增强总开关回归测试通过。
+
+### R07 · P1 · 配置校验只覆盖 CLI，Notebook/API 可静默降级（F13）
+
+**位置：** [training/train.py](D:/Document/Unniversity/emotion_recognition/training/train.py:89)、[training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:299)、[utils/config_validation.py](D:/Document/Unniversity/emotion_recognition/utils/config_validation.py:102)。
+
+**实测与影响：** 三个训练 Notebook、`load_config()` 与 Trainer 构造均不调用集中校验。`loss_type=misspelled_loss` 被独立 validator 正确拒绝，却能构造 Trainer 并静默使用 FocalLoss。另将模型学习率设为 NaN，集中 validator 仍接受，因为仅做区间比较；非法数值未在声明的集中校验阶段被拒绝，错误可能延后到下游或影响监控行为。未知参数与非法值因入口不同而有不同语义。
+
+**修复方案：** 将完整配置校验放进 CLI/Notebook/API 共同调用的构造入口，且在模型移动、创建 run 或更新旧 run 之前执行；未知 loss 使用明确错误分支。数值验证先 `math.isfinite()`，补全类别增强数值与合法 seed 范围。不要仅在 Notebook 增加一条注释声称已校验。
+
+**验收标准：** 同一组未知键、拼错 loss、NaN/Inf 学习率/阈值/dropout、非法增强概率、非法 seed，从 CLI、Notebook 构造单元和 API 均在首批训练与任何正式 run 写入之前拒绝；合法当前三模型配置均通过。新增回归应验证实际入口，不只直接测试 validator 函数。
+
+**状态：** 已修复（2026-10-07）。完整配置校验移入 Trainer 构造入口（在任何模型移动 / 创建 run 之前）；NaN/Inf 数值、seed 范围、类别增强数值补全、未知 loss 明确报错（Trainer 内另有防御分支）；回归覆盖「构造入口实际拒绝」（失败不创建 run 目录）与 validator 级 8 个数值用例。
+
+### R08 · P1 · 普通 CE 基线及公平比较的前置仍未完成（F07/F11）
+
+**位置：** [utils/config_validation.py](D:/Document/Unniversity/emotion_recognition/utils/config_validation.py:61)、[training/trainer.py](D:/Document/Unniversity/emotion_recognition/training/trainer.py:365)、[comparison_protocol_draft.md](D:/Document/Unniversity/emotion_recognition/docs/comparison_protocol_draft.md:8)。
+
+**证据与影响：** 原 F07 要求“普通随机采样 + 交叉熵”基线，当前配置只接受 focal/cb_focal，CLI 无 gamma 覆盖，草案也只写 Focal vs CB-Focal；本次 `loss_type=cross_entropy` 被拒绝。虽然 FocalLoss(gamma=0) 数学上等价 CE，尚未通过可记录的配置入口接入。草案声称同一训练配置，而基座 YAML 的模型级 LR、batch、num_epochs 分别不同；比较预算和执行轮数的最终口径未冻结。不存在 3 模型 × 3 seeds 正式结果，不能将“草案已写”列为实验已验收。
+
+**修复方案：** 为现有训练器加入显式 CE 配置分支（或可记录、经校验的 gamma=0 方案），配套普通随机采样、关闭类别专属增强的基线配置。保留现有三架构，先选定并记录“固定共同方案”或“相同调参预算”之一，写明每模型实际 LR/batch/epochs、早停/调度器、选择指标和 seeds；基线与已有选项的对照每次只改变一项。先补修 R01–R07，再冻结方案，不自动启动训练。
+
+**验收标准：** CE 配置可由同一入口启动，criterion、采样器、有效增强及轮数在 run 中可核查；小例子 loss/梯度与普通 CrossEntropyLoss 等价。协议有冻结日期/commit 和明确预算表，PrivateTest 不参与选择；正式执行后保留每臂 seeds=42/43/44 的全部结果与 mean±样本 std，不能先看 PrivateTest 再修改方案。正式比较前本项状态保持“前置未齐备/实验未执行”。
+
+**状态：** 代码侧已就绪（2026-10-07）；正式比较维持「前置未齐备 / 实验未执行」。新增 `cross_entropy` 损失分支（小例子与 torch CE 等价，回归测试）；`configs/baseline_config.yaml`（CE + 普通采样 + 关类别增强；与主配置防漂移测试）；`--config` CLI 入口（同一入口启动基线）。比较协议升级 comparison-v2：预算口径选定「固定共同方案」（LR=3e-4 / batch=128 / epochs≤90 / cosine_warm / 早停一致；docs/comparison_protocol_draft.md §3.1）与 A–D 对照臂（§3.2）。协议冻结仍需用户评审（冻结时记录日期与 commit）。
+
+### R09 · P2 · 材料口径、比较 Notebook 和 Windows 日志仍需收口（F02/F18/F19）
+
+**位置与证据：** README 与 pyproject 指向 `BernardW18/fer2013-emotion-recognition`，实际 remote 为 `BernardW18/emotion_recognition`；YAML batch 注释仍写 50K/1.5M/400K。比较 Notebook 的训练历史自动取最新 run（当前 MiniCNN 是 2 轮 smoke）或 legacy，测试却固定读取 `<model>_best.pth` 的 legacy 权重，混淆矩阵也读取旧公共图片，不能当成同一批正式实验。三个训练 Notebook 仍默认 `PrivateTest`，与未冻结草案阶段仅用 PublicTest 的约定不匹配。课程 DOCX/PPT 未同步、个人贡献尚未单独成文。
+
+本次还复现：Windows 默认 GBK 下将 `tools/data_audit.py` 输出重定向到日志，打印 `↔` 时 UnicodeEncodeError，JSON 未生成；同一命令加 `-X utf8` 成功。上述历史总览中“全部修复”“代码/README 仍未修改”等相互矛盾表述，本次已在本审核文档校正，README 的功能承诺仍需下一轮同步。
+
+**修复方案：** 用实际 remote 统一链接、更新遗留参数注释；比较 Notebook 通过显式 run/checkpoint/结果清单读取同源 history、参数、指标和图，不按 mtime 自动挑选正式模型，不混用 smoke 与 legacy。调试单元默认 PublicTest；PrivateTest 作为冻结后的独立最终步骤。README 清楚限定精确续训的实测条件；贡献材料只由可核查本人工作组成。Windows 工具的日志入口统一 UTF-8（或安全的 ASCII 输出），把可执行命令写进文档。
+
+**验收标准：** 新 run 生成后，同一模型的曲线、汇总、混淆矩阵与表格都可追溯同一 checkpoint/run/协议；缺文件或来源混合时明确拒绝正式比较。无旧参数量、错误仓库链接或未验证的“全部正确”表述；UTF-8 日志重定向能完成工具并生成有效 JSON。对外提交前报告/PPT/README 与同一结果记录一致，有具体个人贡献清单；未完成材料明确保留待办。
+
+### 下一轮修复顺序与提交门槛
+
+1. 先修 R02/R07（恢复及配置约束）、R05/R06（设备与开关），防止错误设置进入训练。
+2. 修 R01/R03/R04，并把本次探针转成隔离、可重复的回归检查；保留已通过的 75 项基础检查。
+3. 接入 R08 的 CE 基线并冻结现有模型比较口径；重新做一次短训练→完整 last 恢复→导出→PublicTest 评估，核对配置与数据指纹。
+4. 通过后再执行现有模型正式训练；按 R09 整理与结果同源的演示及申请材料。
+
+**执行记录（2026-10-07）**：步骤 1–3 已完成（R01–R08 修复与回归转测试、闭环复核、
+协议预算选定，见下节）；第 4 步的正式训练按用户决策未启动，待协议冻结后执行；
+R09 中的报告/PPT 与个人贡献清单按用户决定保留待办。
+
+用于套磁时，当前适合展示“完成统一加载、可复算评估和数据审计，并通过独立审核发现和修复训练边界问题”的过程。尚不能声称完全可复现、已消除数据重叠或已证明所有不平衡选项有效；这些结论必须来自对应验收与正式对照。无需增加新问题或新架构来替代当前修复。
+
+**状态：** 已修复（2026-10-07，报告/PPT 除外，按用户决定）。仓库链接统一为实际 remote（BernardW18/emotion_recognition）；YAML 遗留参数量注释更新；比较 Notebook 重构为显式来源（`COMPARISON_SOURCES`，缺失即失败、不按 mtime 挑选、不混用 smoke/legacy），混淆矩阵/recall/散点现场生成（不再读取历史图片），实际执行验证通过、重复评估与既有记录完全一致；训练 Notebook 评估默认改为 PublicTest（冻结后最终评估再改 PrivateTest）；工具输出统一 UTF-8（utils/stdio.py；GBK 重定向场景实测通过）。报告 DOCX/PPT 未修改（用户决定拒绝修改 word/ppt，可询问用户核实）；个人贡献清单不做（用户决定，保持待办）。
+
+---
+
+## 第二轮修复（R01–R09）执行记录（2026-10-07）
+
+- **质量门槛**：112 项测试全部通过（新增 R01–R08 回归 37 项）；Ruff / mypy 全绿。
+- **闭环复核**（按审核第 3 步重做）：新短训练 run `20261007_031251_seed42`（mini_cnn）：
+  训练 1 epoch → `--resume auto`（自动应用精确恢复条件 num_workers 4→0 并记录于
+  resume_events；训练协议比对通过；恢复至第 2 轮完成）→ 导出（manifest 记录 run 与
+  SHA-256）→ PublicTest 统一评估（acc=0.3689；与训练时 GPU/AMP 验证值 0.3681 相差
+  3/3589 个样本，源于 AMP 与 CPU-FP32 数值路径差异，如实记录、非缺陷）。
+  run_meta 数据指纹（csv_sha256=3b8d…、splits 28709/3589/3589）与配置完整可核查。
+- **材料决定（记录在案）**：课程报告 DOCX / PPT 不修改（用户决定拒绝修改 word/ppt，
+  可询问用户核实）；个人贡献清单不做（用户决定，保持待办）。
+- **未执行（按用户决策）**：3 模型 × 3 seeds 正式重训、CE/Focal/CB-Focal 对照实验、
+  dedup-v1 去重重训；比较协议（comparison-v2）待用户评审冻结。

@@ -58,9 +58,9 @@ disallow_untyped_defs = false
 ignore_missing_imports = true
 
 [project.urls]
-Homepage = "https://github.com/BernardW18/fer2013-emotion-recognition"
-Repository = "https://github.com/BernardW18/fer2013-emotion-recognition.git"
-Documentation = "https://github.com/BernardW18/fer2013-emotion-recognition#readme"
+Homepage = "https://github.com/BernardW18/emotion_recognition"
+Repository = "https://github.com/BernardW18/emotion_recognition.git"
+Documentation = "https://github.com/BernardW18/emotion_recognition#readme"
 
 [build-system]
 requires = ["setuptools>=64"]

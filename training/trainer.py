@@ -26,6 +26,7 @@ __all__ = [
     "build_optimizer", "build_scheduler",
     "mixup_data", "mixup_criterion",
     "compute_batch_sizes", "compute_group_totals", "update_val_loss_monitor",
+    "enforce_exact_resume_conditions",
     "Trainer",
 ]
 
@@ -48,7 +49,9 @@ from tqdm import tqdm
 
 from training.checkpoint import (
     RUNS_ROOT,
+    _capture_rng_state,
     _format_duration,
+    _restore_rng_state,
     collect_environment_info,
     collect_git_info,
     read_run_meta,
@@ -68,8 +71,9 @@ from training.checkpoint import (
     save_checkpoint as _save_checkpoint,
 )
 from utils.activations import ACTIVATION_REGISTRY, get_activation
+from utils.config_validation import validate_config
 from utils.losses import CBFocalLoss, FocalLoss
-from utils.model_spec import count_parameters, make_spec_from_config
+from utils.model_spec import count_parameters, file_sha256, make_spec_from_config
 
 # 日志
 logger = logging.getLogger("trainer")
@@ -268,6 +272,33 @@ def update_val_loss_monitor(
     return hist_min_val_loss, loss_worse_counter
 
 
+def enforce_exact_resume_conditions(config: dict) -> dict:
+    """
+    精确恢复支持范围（R01）：恢复训练前将数据加载调整为可验证一致的模式——
+    num_workers=0（单进程数据管线；批次顺序与增强随机性由可保存/恢复的 RNG 驱动）。
+
+    多进程 / 持久 worker 下的"恢复 == 连续"未获实测支持；在恢复前调用本函数
+    做调整并记录，是对"精确恢复"的显式前提。
+    返回调整记录（应写入 run_meta 的恢复事件）。
+    """
+    dl = config.setdefault("dataloader", {})
+    original = int(dl.get("num_workers", 0))
+    info = {
+        "exact_resume_supported_scope": "num_workers=0",
+        "original_num_workers": original,
+        "enforced_num_workers": 0,
+        "adjusted": original > 0,
+    }
+    if original > 0:
+        dl["num_workers"] = 0
+        dl["persistent_workers"] = False
+        print(
+            f"  [精确恢复] 数据加载 num_workers 由 {original} 调整为 0"
+            "（精确恢复仅在单进程数据管线下实测支持；调整记录于 run_meta）"
+        )
+    return info
+
+
 # ============================================================
 # Trainer 核心训练器
 # ============================================================
@@ -296,13 +327,21 @@ class Trainer:
         run_dir: str | Path | None = None,
         run_meta_extra: dict | None = None,
     ):
-        self.model = model.to(device)
+        # ---- 配置集中校验（R07）：在任何模型移动 / run 写入之前执行 ----
+        validate_config(config, model_name=model_name)
+
+        # ---- 设备解析先于模型移动（R05）----
+        if device is not None:
+            self.device = device if isinstance(device, torch.device) else torch.device(device)
+        else:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.model = model.to(self.device)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.test_loader = test_loader
         self.config = config
         self.model_name = model_name
-        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # ---- 模型规格（F01）：与 checkpoint / 推理共用同一来源 ----
         self.model_spec = make_spec_from_config(config, model_name)
@@ -341,9 +380,15 @@ class Trainer:
         self.val_loss_patience = config["training"].get("val_loss_patience", 0)
         self.val_loss_threshold = config["training"].get("val_loss_threshold", 1.05)
 
-        # MixUp
-        self.mixup_enabled = config.get("augmentation", {}).get("mixup", {}).get("enabled", False)
-        self.mixup_alpha = config.get("augmentation", {}).get("mixup", {}).get("alpha", 0.2)
+        # ---- 增强（R06）：批级（MixUp）与类别专属增强均受总开关约束 ----
+        self.augmentation_master = bool(config.get("augmentation", {}).get("enabled", False))
+        mixup_cfg = config.get("augmentation", {}).get("mixup", {})
+        self.mixup_enabled = self.augmentation_master and bool(mixup_cfg.get("enabled", False))
+        self.mixup_alpha = mixup_cfg.get("alpha", 0.2)
+        self.class_specific_enabled = (
+            self.augmentation_master
+            and bool(config.get("augmentation", {}).get("class_specific", {}).get("enabled", False))
+        )
 
         # ---- 类别计数（F06）：采样器与 CB Focal Loss 必须同源 ----
         ds_counts = getattr(train_loader.dataset, "class_counts", None)
@@ -358,8 +403,14 @@ class Trainer:
         resolved_counts = class_counts if class_counts is not None else ds_counts
         self.class_counts = list(resolved_counts) if resolved_counts is not None else None
 
-        # ---- 损失函数 ----
+        # ---- 损失函数（R08：显式 cross_entropy 分支；未知类型明确报错）----
         loss_type = config["training"].get("loss_type", "focal")
+        self.loss_type = loss_type
+        self.focal_gamma = focal_gamma
+        self.cb_focal_beta: float | None = None
+        self.class_balanced_sampling = bool(
+            config.get("dataloader", {}).get("class_balanced_sampling", False)
+        )
         self.criterion: nn.Module
         if loss_type == "cb_focal":
             if self.class_counts is None:
@@ -367,7 +418,8 @@ class Trainer:
                     "loss_type=cb_focal 需要 class_counts：请通过 create_dataloaders 构建训练集"
                     "或显式传入（不再回退硬编码常量）"
                 )
-            beta = config["training"].get("cb_focal_beta", 0.999)
+            beta = float(config["training"].get("cb_focal_beta", 0.999))
+            self.cb_focal_beta = beta
             self.criterion = CBFocalLoss(
                 gamma=focal_gamma, beta=beta, class_counts=self.class_counts
             )
@@ -375,13 +427,21 @@ class Trainer:
                 f"  loss: CBFocalLoss(gamma={focal_gamma}, beta={beta}) | "
                 f"class_counts={self.class_counts}"
             )
-        else:
+        elif loss_type == "cross_entropy":
+            self.criterion = nn.CrossEntropyLoss()
+            print("  loss: CrossEntropyLoss（普通 CE 基线）")
+        elif loss_type == "focal":
             self.criterion = FocalLoss(gamma=focal_gamma)
             if self.class_counts is not None:
                 print(
                     f"  loss: FocalLoss(gamma={focal_gamma}) | "
                     f"class_counts(采样器参考)={self.class_counts}"
                 )
+        else:
+            raise ValueError(
+                f"未知 loss_type: {loss_type!r}"
+                "（合法: focal / cb_focal / cross_entropy；应由配置校验提前拦截）"
+            )
 
         # ---- 优化器 & 调度器 ----
         merged_training = dict(config["training"])
@@ -445,18 +505,15 @@ class Trainer:
         self._accumulated_train_time = 0.0
         self._total_train_time = 0.0
 
-        # ---- run_meta（F05）：启动时记录 生效配置 / CLI / git / 环境 / 数据指纹 ----
+        # ---- run_meta（F05/R02）：仅新 run 在构造时落盘；已存在的 run 在恢复校验
+        #      通过之前不改写任何文件（失败不得先改写原 run 元数据） ----
+        self._run_meta_extra = run_meta_extra or {}
         existing_meta = read_run_meta(self.run_dir)
         if existing_meta is None:
             self.run_meta = self._build_run_meta(run_meta_extra)
+            self._persist_run_meta(status="initialized")
         else:
             self.run_meta = existing_meta
-            self.run_meta.setdefault("resume_events", []).append({
-                "resumed_at": datetime.now().isoformat(),
-                "previous_status": existing_meta.get("status"),
-            })
-            self.run_meta["updated_at"] = datetime.now().isoformat()
-        self._persist_run_meta(status=self.run_meta.get("status", "initialized"))
 
         # 生效配置落盘（若调用方尚未写入）
         config_path = self.run_dir / "config_effective.yaml"
@@ -485,6 +542,11 @@ class Trainer:
             "amp": self.use_amp,
             "cudnn_deterministic": self.deterministic,
             "torch_compile": self.use_compile,
+            "effective_augmentation": {
+                "master": self.augmentation_master,
+                "mixup": self.mixup_enabled,
+                "class_specific": self.class_specific_enabled,
+            },
             "data": split_fp if split_fp is not None else {
                 "note": "split_fingerprint 未提供（train_loader 非 create_dataloaders 构建）"
             },
@@ -496,6 +558,64 @@ class Trainer:
         self.run_meta.update(updates)
         self.run_meta["updated_at"] = datetime.now().isoformat()
         write_run_meta(self.run_dir, self.run_meta)
+
+    def get_training_protocol(self) -> dict:
+        """
+        训练协议快照（R02）：恢复前逐项比对，防止"换了配置/数据仍续写原 run"。
+        全部取运行时有效值（而非配置原始文本）。
+        """
+        dataset = getattr(self.train_loader, "dataset", None)
+        return {
+            "loss": {
+                "type": self.loss_type,
+                "focal_gamma": self.focal_gamma,
+                "cb_focal_beta": self.cb_focal_beta,
+            },
+            "class_balanced_sampling": self.class_balanced_sampling,
+            "augmentation": {
+                "master": self.augmentation_master,
+                "mixup": self.mixup_enabled,
+                "mixup_alpha": self.mixup_alpha,
+                "class_specific": self.class_specific_enabled,
+            },
+            "train_batch_size": self.train_loader.batch_size,
+            "gradient_accumulation_steps": self.grad_accum_steps,
+            # 基准学习率取配置值（不随调度器变化；避免恢复时误报差异）
+            "optimizer": {
+                "name": self.config["training"].get("optimizer", "adam"),
+                "lr": float(self.model_config.get(
+                    "learning_rate", self.config["training"]["learning_rate"]
+                )),
+                "weight_decay": float(self.config["training"].get("weight_decay", 0.0)),
+            },
+            "scheduler": {
+                "name": self.config["training"].get("scheduler", "none"),
+                "num_epochs": self.scheduler_num_epochs,
+            },
+            "monitor_metric": self.monitor_metric,
+            "save_best": self.save_best,
+            "amp": self.use_amp,
+            "cudnn_deterministic": self.deterministic,
+            "data_fingerprint": getattr(dataset, "split_fingerprint", None),
+        }
+
+    def _record_resume_event(self, checkpoint_path, *, protocol_verified: bool,
+                             notes: list | None = None) -> None:
+        """恢复成功后记录事件（R02）：含当次 CLI/git/环境与生效配置摘要。"""
+        event = {
+            "resumed_at": datetime.now().isoformat(),
+            "checkpoint": str(checkpoint_path),
+            "checkpoint_sha256": file_sha256(checkpoint_path),
+            "protocol_verified": protocol_verified,
+            "notes": list(notes or []),
+            "cli_args": self._run_meta_extra.get("cli_args"),
+            "resume_conditions": self._run_meta_extra.get("resume_conditions"),
+            "git_commit": collect_git_info().get("commit"),
+            "environment": collect_environment_info(),
+            "config_effective_sha256": file_sha256(self.run_dir / "config_effective.yaml"),
+        }
+        self.run_meta.setdefault("resume_events", []).append(event)
+        self._persist_run_meta()
 
     def _write_history(self) -> None:
         write_json_atomic(self.run_dir / "history.json", self.history)
@@ -532,33 +652,59 @@ class Trainer:
     # ========================================================
     def diagnose(self, num_steps: int = 10) -> dict:
         """
-        性能诊断：逐步计时，定位训练瓶颈（含预热）。
+        性能诊断：在**独立副本**上逐步计时，定位训练瓶颈（含 3 步预热）。
 
-        注意：会执行真实训练步骤（修改模型权重）；归一化与分组同正式训练逻辑
-        （梯度累积 K>1 时按组内实际样本数缩放），但为了测"单步"性能，
-        step 频率为每 micro-batch 一次，与正式训练的组末 step 不同。
+        R03 隔离保证:
+          - 独立模型 / 优化器 / GradScaler / 数据加载器副本；不消费正式 loader 的
+            持久 worker / 增强队列状态
+          - 结束后恢复主运行 RNG；正式模型参数、BN buffer、优化器、scheduler、
+            scaler、loader/sampler 状态与 run 文件均不受影响（"先诊断再 fit" 与
+            "直接 fit" 得到同批输入与同等结果）
+          - K>1 时按真实分组语义在组末执行 optimizer step
         """
+        import copy as _copy
         import statistics
 
         warmup_steps = 3
         total_steps = warmup_steps + num_steps
+        device = self.device
+        rng_state = _capture_rng_state()
+
+        # ---- 独立副本：模型 / 优化器 / scaler ----
+        base_model = getattr(self.model, "_orig_mod", self.model)
+        probe_model = _copy.deepcopy(base_model).to(device)
+        probe_model.train()
+        merged = dict(self.config["training"])
+        merged["learning_rate"] = self.model_config.get(
+            "learning_rate", self.config["training"]["learning_rate"]
+        )
+        probe_optimizer = build_optimizer(probe_model, merged)
+        probe_scaler = torch.amp.GradScaler("cuda") if self.use_amp else None
+
+        # ---- 独立数据加载器（不触碰正式 loader 的持久 worker / 队列状态）----
+        probe_loader = DataLoader(
+            self.train_loader.dataset,
+            batch_size=self.train_loader.batch_size,
+            shuffle=False,
+            num_workers=0,
+        )
+        sizes = compute_batch_sizes(probe_loader)
+        group_totals = compute_group_totals(sizes, self.grad_accum_steps)
 
         print(f"\n{'=' * 50}")
-        print(f"性能诊断 | {warmup_steps} 步预热 + {num_steps} 步采样 | 设备: {self.device}")
+        print(f"性能诊断 | {warmup_steps} 步预热 + {num_steps} 步采样 | 设备: {device}")
         print(f"   AMP: {self.use_amp} | Compile: {self.use_compile}")
         print(f"   cudnn.benchmark: {torch.backends.cudnn.benchmark}")
         print(f"   cudnn.deterministic: {torch.backends.cudnn.deterministic}")
         if torch.cuda.is_available():
-            mp = torch.get_float32_matmul_precision()
-            print(f"   float32_matmul_precision: {mp}")
-        print(f"   batch_size: {self.train_loader.batch_size}")
+            print(f"   float32_matmul_precision: {torch.get_float32_matmul_precision()}")
+        print(f"   batch_size: {probe_loader.batch_size}")
         print(f"   GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'}")
-        if torch.cuda.is_available():
-            torch.cuda.reset_peak_memory_stats()
-        print(f"{'=' * 50}")
+        print("   隔离模式：诊断运行在独立副本上，主训练状态与 run 文件不受影响")
 
-        sizes = compute_batch_sizes(self.train_loader)
-        group_totals = compute_group_totals(sizes, self.grad_accum_steps)
+        def _sync():
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
 
         warmup_timings: dict[str, list[float]] = {
             "data_load": [], "forward": [], "backward": [], "optimizer": [],
@@ -567,136 +713,153 @@ class Trainer:
             "data_load": [], "forward": [], "backward": [], "optimizer": [],
         }
 
-        self.model.train()
-        data_iter = iter(self.train_loader)
-        self.optimizer.zero_grad(set_to_none=True)
+        data_iter = iter(probe_loader)
+        probe_optimizer.zero_grad(set_to_none=True)
 
-        for step_idx in range(total_steps):
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            t0 = time.perf_counter()
-            try:
-                images, labels = next(data_iter)
-            except StopIteration:
-                data_iter = iter(self.train_loader)
-                images, labels = next(data_iter)
-            if images.device != self.device:
-                images = images.to(self.device, non_blocking=True)
-                labels = labels.to(self.device, non_blocking=True)
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            t1 = time.perf_counter()
+        try:
+            for step_idx in range(total_steps):
+                _sync()
+                t0 = time.perf_counter()
+                try:
+                    images, labels = next(data_iter)
+                except StopIteration:
+                    data_iter = iter(probe_loader)
+                    images, labels = next(data_iter)
+                if images.device != device:
+                    images = images.to(device, non_blocking=True)
+                    labels = labels.to(device, non_blocking=True)
+                _sync()
+                t1 = time.perf_counter()
 
-            batch_size = images.size(0)
-            group_total = group_totals[step_idx % len(group_totals)] if group_totals else batch_size
+                batch_size = images.size(0)
+                group_total = (
+                    group_totals[step_idx % len(group_totals)] if group_totals else batch_size
+                )
 
-            if self.use_amp:
-                with torch.amp.autocast("cuda"):
-                    outputs = self.model(images)
-                    loss = self.criterion(outputs, labels)
-            else:
-                outputs = self.model(images)
-                loss = self.criterion(outputs, labels)
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            t2 = time.perf_counter()
-
-            scaled_loss = loss * batch_size / group_total
-            if self.use_amp:
-                self._grad_scaler().scale(scaled_loss).backward()
-            else:
-                scaled_loss.backward()
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            t3 = time.perf_counter()
-
-            if self.max_grad_norm > 0:
                 if self.use_amp:
-                    self._grad_scaler().unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-            if self.use_amp:
-                self._grad_scaler().step(self.optimizer)
-                self._grad_scaler().update()
+                    assert probe_scaler is not None
+                    with torch.amp.autocast("cuda"):
+                        outputs = probe_model(images)
+                        loss = self.criterion(outputs, labels)
+                else:
+                    outputs = probe_model(images)
+                    loss = self.criterion(outputs, labels)
+                _sync()
+                t2 = time.perf_counter()
+
+                scaled_loss = loss * batch_size / group_total
+                if self.use_amp:
+                    assert probe_scaler is not None
+                    probe_scaler.scale(scaled_loss).backward()
+                else:
+                    scaled_loss.backward()
+                _sync()
+                t3 = time.perf_counter()
+
+                # 组末 step（保留 K>1 的真实分组语义）
+                if (step_idx + 1) % self.grad_accum_steps == 0 or (step_idx + 1) == total_steps:
+                    if self.max_grad_norm > 0:
+                        if self.use_amp:
+                            assert probe_scaler is not None
+                            probe_scaler.unscale_(probe_optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            probe_model.parameters(), self.max_grad_norm
+                        )
+                    if self.use_amp:
+                        assert probe_scaler is not None
+                        probe_scaler.step(probe_optimizer)
+                        probe_scaler.update()
+                    else:
+                        probe_optimizer.step()
+                    probe_optimizer.zero_grad(set_to_none=True)
+                _sync()
+                t4 = time.perf_counter()
+
+                phase_times = {
+                    "data_load": (t1 - t0) * 1000,
+                    "forward": (t2 - t1) * 1000,
+                    "backward": (t3 - t2) * 1000,
+                    "optimizer": (t4 - t3) * 1000,
+                }
+
+                if step_idx < warmup_steps:
+                    for k, v in phase_times.items():
+                        warmup_timings[k].append(v)
+                    phase_total = sum(phase_times.values())
+                    print(f"   预热 {step_idx + 1}/{warmup_steps}: {phase_total:.0f}ms")
+                else:
+                    for k, v in phase_times.items():
+                        timings[k].append(v)
+
+            print(f"\n{'阶段':<15} {'平均(ms)':<12} {'最小(ms)':<12} {'最大(ms)':<12}")
+            print(f"{'-' * 51}")
+            total_avg = 0.0
+            for stage, values in timings.items():
+                avg = statistics.mean(values)
+                total_avg += avg
+                print(f"{stage:<15} {avg:>10.2f}  {min(values):>10.2f}  {max(values):>10.2f}")
+
+            _sync()
+            probe_model.eval()
+            eval_start = time.perf_counter()
+            with torch.no_grad():
+                for xb, yb in self.val_loader:
+                    xb = xb.to(device, non_blocking=True)
+                    yb = yb.to(device, non_blocking=True)
+                    if self.use_amp:
+                        with torch.amp.autocast("cuda"):
+                            probe_model(xb)
+                    else:
+                        probe_model(xb)
+            _sync()
+            eval_time = (time.perf_counter() - eval_start) * 1000
+            print(f"{'eval (全部)':<15} {eval_time:>10.2f}  {'':<12} {'':<12}")
+
+            if warmup_timings["forward"]:
+                warmup_total = sum(statistics.mean(v) for v in warmup_timings.values())
+                print(f"\n   预热阶段平均: {warmup_total:.0f}ms/步 → "
+                      f"采样阶段平均: {total_avg:.0f}ms/步")
+
+            if torch.cuda.is_available():
+                print(f"   VRAM: {torch.cuda.memory_allocated() / 1024**2:.0f}MB / "
+                      f"{torch.cuda.max_memory_allocated() / 1024**2:.0f}MB peak")
+
+            est_it_per_sec = 1000.0 / total_avg if total_avg > 0 else 0
+            print(f"{'-' * 51}")
+            print(f"{'单步总计':<15} {total_avg:>10.2f} ms")
+            print(f"{'预估稳态速度':<15} ~{est_it_per_sec:.0f} it/s")
+
+            print("\n💡 诊断建议:")
+            if torch.backends.cudnn.deterministic:
+                print("   ⚠️  cudnn.deterministic=True：强制使用慢速确定性算法，建议在配置中关闭")
+            max_stage = max(timings, key=lambda k: statistics.mean(timings[k]))
+            max_pct = (
+                statistics.mean(timings[max_stage]) / total_avg * 100 if total_avg > 0 else 0
+            )
+            if est_it_per_sec < 10:
+                print(f"   ⚠️  速度异常低（{est_it_per_sec:.0f} it/s），"
+                      f"主要瓶颈: {max_stage} ({max_pct:.0f}%)")
+                if max_stage == "data_load":
+                    print("       → 数据加载瓶颈，检查 num_workers 是否足够")
+                elif max_stage == "forward":
+                    print("       → 前向瓶颈，检查模型大小")
+                elif max_stage == "backward":
+                    print("       → 反向瓶颈，检查 AMP 是否正常工作")
+            elif est_it_per_sec < 50:
+                print(f"   ⚡ 速度正常偏低（{est_it_per_sec:.0f} it/s），"
+                      f"瓶颈: {max_stage} ({max_pct:.0f}%)")
+                if max_stage == "backward":
+                    print("       → Windows WDDM 驱动有额外开销，属正常范围")
             else:
-                self.optimizer.step()
-            self.optimizer.zero_grad(set_to_none=True)
-            torch.cuda.synchronize() if torch.cuda.is_available() else None
-            t4 = time.perf_counter()
+                print(f"   ✅ 速度正常（{est_it_per_sec:.0f} it/s）")
 
-            phase_times = {
-                "data_load": (t1 - t0) * 1000,
-                "forward": (t2 - t1) * 1000,
-                "backward": (t3 - t2) * 1000,
-                "optimizer": (t4 - t3) * 1000,
-            }
+            print(f"{'=' * 50}\n")
 
-            if step_idx < warmup_steps:
-                for k, v in phase_times.items():
-                    warmup_timings[k].append(v)
-                phase_total = sum(phase_times.values())
-                print(f"   预热 {step_idx + 1}/{warmup_steps}: {phase_total:.0f}ms")
-            else:
-                for k, v in phase_times.items():
-                    timings[k].append(v)
-
-        print(f"\n{'阶段':<15} {'平均(ms)':<12} {'最小(ms)':<12} {'最大(ms)':<12}")
-        print(f"{'-' * 51}")
-        total_avg = 0.0
-        for stage, values in timings.items():
-            avg = statistics.mean(values)
-            total_avg += avg
-            mn = min(values)
-            mx = max(values)
-            print(f"{stage:<15} {avg:>10.2f}  {mn:>10.2f}  {mx:>10.2f}")
-
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
-        eval_start = time.perf_counter()
-        self.evaluate()
-        torch.cuda.synchronize() if torch.cuda.is_available() else None
-        eval_time = (time.perf_counter() - eval_start) * 1000
-        print(f"{'eval (全部)':<15} {eval_time:>10.2f}  {'':<12} {'':<12}")
-
-        if warmup_timings["forward"]:
-            warmup_total = sum(statistics.mean(v) for v in warmup_timings.values())
-            print(
-                f"\n   预热阶段平均: {warmup_total:.0f}ms/步 → "
-                f"采样阶段平均: {total_avg:.0f}ms/步"
-            )
-
-        if torch.cuda.is_available():
-            print(f"   VRAM: {torch.cuda.memory_allocated() / 1024**2:.0f}MB / "
-                  f"{torch.cuda.max_memory_allocated() / 1024**2:.0f}MB peak")
-
-        est_it_per_sec = 1000.0 / total_avg if total_avg > 0 else 0
-        print(f"{'-' * 51}")
-        print(f"{'单步总计':<15} {total_avg:>10.2f} ms")
-        print(f"{'预估稳态速度':<15} ~{est_it_per_sec:.0f} it/s")
-
-        print("\n💡 诊断建议:")
-        if torch.backends.cudnn.deterministic:
-            print("   ⚠️  cudnn.deterministic=True：强制使用慢速确定性算法，建议在配置中关闭")
-        max_stage = max(timings, key=lambda k: statistics.mean(timings[k]))
-        max_pct = statistics.mean(timings[max_stage]) / total_avg * 100 if total_avg > 0 else 0
-        if est_it_per_sec < 10:
-            print(
-                f"   ⚠️  速度异常低（{est_it_per_sec:.0f} it/s），"
-                f"主要瓶颈: {max_stage} ({max_pct:.0f}%)"
-            )
-            if max_stage == "data_load":
-                print("       → 数据加载瓶颈，检查 num_workers 是否足够")
-            elif max_stage == "forward":
-                print("       → 前向瓶颈，检查模型大小")
-            elif max_stage == "backward":
-                print("       → 反向瓶颈，检查 AMP 是否正常工作")
-        elif est_it_per_sec < 50:
-            print(
-                f"   ⚡ 速度正常偏低（{est_it_per_sec:.0f} it/s），"
-                f"瓶颈: {max_stage} ({max_pct:.0f}%)"
-            )
-            if max_stage == "backward":
-                print("       → Windows WDDM 驱动有额外开销，属正常范围")
-        else:
-            print(f"   ✅ 速度正常（{est_it_per_sec:.0f} it/s）")
-
-        print(f"{'=' * 50}\n")
-
-        return {k: statistics.mean(v) for k, v in timings.items()}
+            return {k: statistics.mean(v) for k, v in timings.items()}
+        finally:
+            # R03：恢复主运行 RNG（诊断消耗的随机数不泄漏到正式训练）
+            _restore_rng_state(rng_state)
+            del probe_loader, probe_model, probe_optimizer
 
     # ========================================================
     # 训练一个 epoch（梯度累积按组内实际样本数归一化）
@@ -884,20 +1047,21 @@ class Trainer:
         print(f"{'=' * 60}\n")
 
         fit_start = time.time()
+        session_start_epoch = self.start_epoch
         self._persist_run_meta(
             status="running",
             last_fit_started_at=datetime.now().isoformat(),
             last_fit_requested_epochs=additional_epochs,
-            fit_start_epoch=self.start_epoch,
+            fit_start_epoch=session_start_epoch,
         )
 
         stop_reason = None
         interrupted = False
 
         try:
-            for epoch in range(self.start_epoch, self.start_epoch + additional_epochs):
+            for epoch in range(session_start_epoch, session_start_epoch + additional_epochs):
                 self._current_epoch = epoch
-                session_epoch = epoch - self.start_epoch + 1
+                session_epoch = epoch - session_start_epoch + 1
                 epoch_start = time.time()
 
                 # 训练 + 验证
@@ -908,7 +1072,7 @@ class Trainer:
                 # 计时统计
                 epoch_elapsed = time.time() - epoch_start
                 self._total_train_time = self._accumulated_train_time + (time.time() - fit_start)
-                epochs_this_session = epoch - self.start_epoch + 1
+                epochs_this_session = epoch - session_start_epoch + 1
 
                 total_history_epochs = len(self.history["train_loss"])
                 if total_history_epochs > 0 and self._accumulated_train_time > 0:
@@ -916,7 +1080,7 @@ class Trainer:
                 else:
                     avg_epoch_time = (time.time() - fit_start) / epochs_this_session
 
-                remaining_epochs = self.start_epoch + additional_epochs - epoch - 1
+                remaining_epochs = session_start_epoch + additional_epochs - epoch - 1
                 eta_seconds = avg_epoch_time * remaining_epochs
 
                 # 记录历史
@@ -1017,7 +1181,7 @@ class Trainer:
         except KeyboardInterrupt:
             interrupted = True
             self._total_train_time = self._accumulated_train_time + (time.time() - fit_start)
-            interrupted_epoch = getattr(self, "_current_epoch", self.start_epoch)
+            interrupted_epoch = getattr(self, "_current_epoch", session_start_epoch)
             print(f"\n⚠️  训练被用户中断 (第 {interrupted_epoch} 轮)")
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             interrupt_path = (
@@ -1027,12 +1191,17 @@ class Trainer:
             print(f"断点已保存至: {interrupt_path}（partial：权重含未完成 epoch 的部分更新）")
             print("   可通过 --resume auto 从最近完整 epoch 继续")
         except Exception as e:
+            # 失败会话的耗时同样计入累计（时间实际已消耗；状态由 run_meta 标记 failed）
+            self._accumulated_train_time += time.time() - fit_start
             self._persist_run_meta(status="failed", error=repr(e))
             raise
 
-        # ---- 收尾 ----
+        # ---- 收尾（R04：推进会话起点与累计时长，支持同实例重复 fit）----
+        self._accumulated_train_time += time.time() - fit_start
+        self._total_train_time = self._accumulated_train_time
+        self.start_epoch = len(self.history["train_loss"]) + 1
         self._write_history()
-        final_epoch = getattr(self, "_current_epoch", self.start_epoch - 1)
+        final_epoch = getattr(self, "_current_epoch", session_start_epoch - 1)
 
         if interrupted:
             self._persist_run_meta(

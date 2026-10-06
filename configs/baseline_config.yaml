@@ -1,0 +1,111 @@
+# ============================================================
+# FER2013 基线训练配置（R08：CE + 普通随机采样）
+#
+# 用途：不平衡策略对照的基线臂（F07/F11）——
+#   "普通随机采样 + 交叉熵损失 + 关闭类别专属增强"。
+# 与 configs/training_config.yaml 保持同步，仅以下三处不同：
+#   1) training.loss_type = "cross_entropy"（普通交叉熵）
+#   2) dataloader.class_balanced_sampling = false（普通随机采样）
+#   3) augmentation.class_specific.enabled = false（关闭类别专属增强）
+# 其余（常规图像增强、超参数、调度器、早停）与主配置一致。
+#
+# 用法（与主配置同一入口，通过 --config 切换）：
+#   python training/train.py --config configs/baseline_config.yaml --model vgg_lite --epochs 90
+#   （正式比较前按协议冻结后执行；未冻结、未执行）
+# ============================================================
+
+# 数据配置
+data:
+  dataset_path: "data/fer2013.csv"
+  image_size: 48
+  num_classes: 7
+  class_names: ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
+
+# 数据加载性能配置
+dataloader:
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 6
+  class_balanced_sampling: false   # 【与主配置差异 2】普通随机采样（基线臂）
+
+# 数据增强
+augmentation:
+  enabled: true
+  random_horizontal_flip: 0.5
+  random_rotation: 10
+  random_affine_translate: 0.1
+  color_jitter_brightness: 0.2
+  color_jitter_contrast: 0.2
+  random_erase: true
+
+  # 类别特定增强：基线臂关闭
+  class_specific:
+    enabled: false                 # 【与主配置差异 3】关闭类别专属增强
+    target_classes: [1]
+    augment_prob: 0.8
+    extra_rotation: 20
+    extra_translate: 0.15
+    extra_erase_prob: 0.2
+
+  mixup:
+    enabled: false
+    alpha: 0.2
+
+# 训练超参数
+training:
+  batch_size: 128
+  num_epochs: 50
+  learning_rate: 0.001
+  weight_decay: 1.0e-4
+  optimizer: "adam"
+  activation: "relu"
+  scheduler: "cosine_warm"
+  scheduler_step_size: 10
+  scheduler_gamma: 0.5
+  scheduler_t0: 30
+  patience: 10
+  val_loss_patience: 15
+  val_loss_threshold: 1.05
+  loss_type: "cross_entropy"       # 【与主配置差异 1】普通交叉熵（基线臂）
+  cb_focal_beta: 0.999
+  amp: true
+  torch_compile: false
+  torch_compile_mode: "reduce-overhead"
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  cudnn_deterministic: false
+
+# 模型特定覆盖（数值同主配置；正式比较的"固定共同方案"由协议冻结后统一，见 docs/comparison_protocol_draft.md）
+models:
+  mini_cnn:
+    learning_rate: 0.0005
+    batch_size: 256
+    num_epochs: 30
+    dropout: 0.3
+    activation: "relu"
+
+  vgg_lite:
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
+    dropout: 0.5
+    activation: "relu"
+
+  micro_resnet:
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
+    dropout: 0.3
+    activation: "gelu"
+    use_se: false
+
+# 保存策略
+checkpoint:
+  save_best: true
+  save_every_n_epochs: 5
+  monitor_metric: "val_acc"
+  max_checkpoint_files: 5
+
+# 随机种子
+seed: 42

@@ -46,3 +46,24 @@ def test_invalid_configs_raise(config, mutate, expect_msg):
     mutate(cfg)
     with pytest.raises(ConfigValidationError, match=f".*{expect_msg}.*"):
         validate_config(cfg, model_name="micro_resnet")
+
+@pytest.mark.parametrize(
+    "mutate,expect_msg",
+    [
+        (lambda c: c["training"].update(learning_rate=float("nan")), "有限数值"),
+        (lambda c: c["training"].update(weight_decay=float("inf")), "有限数值"),
+        (lambda c: c["training"].update(val_loss_threshold=float("nan")), "有限数值"),
+        (lambda c: c["models"]["micro_resnet"].update(learning_rate=float("nan")), "有限数值"),
+        (lambda c: c.update(seed=-1), "范围内"),
+        (lambda c: c.update(seed=2**32), "范围内"),
+        (lambda c: c["augmentation"]["class_specific"].update(extra_translate=float("nan")),
+         "有限数值"),
+        (lambda c: c["augmentation"]["class_specific"].update(extra_erase_prob=1.5),
+         "必须 <= 1.0"),
+    ],
+)
+def test_invalid_numeric_configs_raise(config, mutate, expect_msg):
+    cfg = copy.deepcopy(config)
+    mutate(cfg)
+    with pytest.raises(ConfigValidationError, match=f".*{expect_msg}.*"):
+        validate_config(cfg, model_name="micro_resnet")

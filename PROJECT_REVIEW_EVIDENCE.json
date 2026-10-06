@@ -1151,5 +1151,507 @@
     "original_csv_and_weights_verified_unchanged": true,
     "record_is_historical": true,
     "current_status_replaced_by": "cuda_environment"
+  },
+  "first_refactor_independent_audit": {
+    "checked_on": "2026-10-07T02:53:39.873228",
+    "reviewed_git_commit": "6d02afd117183b4ded3896a32ddbf07d0c8fa7cc",
+    "verdict": "partial_pass_correctness_rework_required",
+    "scope": "review only; no model or training implementation changes; no formal retraining",
+    "environment": {
+      "python_executable": "D:\\Document\\Unniversity\\emotion_recognition\\.venv\\Scripts\\python.exe",
+      "python": "3.10.11",
+      "torch": "2.14.1+cu130",
+      "torchvision": "0.29.1+cu130",
+      "cuda_runtime": "13.0",
+      "cuda_available": true,
+      "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+      "gpu_tensor_fixture_passed": true,
+      "notebook_kernel_interpreter_verified": true,
+      "pip_check": "No broken requirements found."
+    },
+    "quality_checks": {
+      "pytest_passed": 75,
+      "pytest_failed": 0,
+      "pytest_skipped": 0,
+      "pytest_seconds": 7.71,
+      "torch_cpu_threads": 4,
+      "pytest_warnings": 1,
+      "warning": "Full backward hook fires on module outputs when inputs do not require gradients",
+      "ruff": {
+        "passed": true,
+        "output": "All checks passed!"
+      },
+      "mypy": {
+        "passed": true,
+        "source_files": 32,
+        "output": "Success: no issues found in 32 source files"
+      },
+      "existing_tests_do_not_cover_all_reviewed_boundaries": true
+    },
+    "fixture_protocol": {
+      "model": "MiniCNN built from current model_spec, seven classes",
+      "n_samples": 14,
+      "input": "torch.rand(14,1,48,48,generator=Generator().manual_seed(19))",
+      "labels": "torch.arange(14) % 7",
+      "class_counts": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "sampler": "WeightedRandomSampler(torch.ones(14),14,replacement=True)",
+      "seed": 42,
+      "batch_size": 4,
+      "dropout": 0,
+      "amp": false,
+      "scheduler": "none",
+      "early_stop": "both disabled",
+      "max_grad_norm": 0,
+      "augmentation": "disabled except master-switch contradiction probe",
+      "device": "CPU except default-device probe on real CUDA host",
+      "resume_workers": 2,
+      "persistent_workers": true,
+      "precision": "CPU float32, torch threads=4",
+      "results_are_synthetic_correctness_probes_not_FER2013_experiments": true
+    },
+    "correctness_probes": {
+      "persistent_workers_resume": {
+        "workers": 2,
+        "persistent_workers": true,
+        "sampler": "WeightedRandomSampler",
+        "continuous_second_epoch_labels": [
+          [
+            4,
+            1,
+            5,
+            1
+          ],
+          [
+            6,
+            3,
+            2,
+            0
+          ],
+          [
+            2,
+            1,
+            5,
+            3
+          ],
+          [
+            0,
+            6
+          ]
+        ],
+        "resumed_second_epoch_labels": [
+          [
+            1,
+            5,
+            1,
+            6
+          ],
+          [
+            3,
+            2,
+            0,
+            2
+          ],
+          [
+            1,
+            5,
+            3,
+            0
+          ],
+          [
+            6,
+            6
+          ]
+        ],
+        "batch_order_equal": false,
+        "max_parameter_difference": 0.007487773895263672,
+        "continuous_second_val_loss": 1.4124573469161987,
+        "resumed_second_val_loss": 1.4197341203689575
+      },
+      "resume_changed_config_and_data": {
+        "accepted": true,
+        "error": null,
+        "actual_loss_type": "CBFocalLoss",
+        "old_loss_type": "FocalLoss",
+        "actual_csv_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "recorded_csv_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "config_effective_still_old": true
+      },
+      "repeat_fit": {
+        "start_epoch_after_two_fits": 1,
+        "history_epochs": 2,
+        "checkpoint_epoch": 2,
+        "run_meta_final_epoch": 1,
+        "periodic_checkpoint_files": [
+          "epoch_0001.pth"
+        ]
+      },
+      "default_device": {
+        "selected_device": "cuda",
+        "model_device": "cpu",
+        "train_succeeded": false,
+        "error": "Input type (torch.cuda.FloatTensor) and weight type (torch.FloatTensor) should be the same"
+      },
+      "mixup_master_switch": {
+        "augmentation_enabled": false,
+        "mixup_child_enabled": true,
+        "effective_mixup_enabled": true,
+        "observed_mixup_calls": 4
+      }
+    },
+    "additional_checks": {
+      "diagnose_on_training_instance": {
+        "max_parameter_difference": 0.4984796941280365,
+        "optimizer_updates": 4.0,
+        "history_epochs": 0,
+        "rng_unchanged": false
+      },
+      "constructor_config_validation": {
+        "standalone_validator_accepts_unknown_loss": false,
+        "trainer_accepts_unknown_loss": true,
+        "actual_loss": "FocalLoss"
+      },
+      "validator_accepts_nan_learning_rate": true,
+      "plain_ce_config": {
+        "accepted": false,
+        "error": "[training.loss_type] 取值 'cross_entropy' 不被支持，可选: ['cb_focal', 'focal']"
+      },
+      "saved_evaluation_consistency": {
+        "legacy_micro_resnet_PrivateTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 6.965961127369802e-09,
+            "nll": 6.730716207714593e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PrivateTest"
+        },
+        "legacy_micro_resnet_PublicTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 1.702748442244939e-09,
+            "nll": 1.9019740393755313e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PublicTest"
+        },
+        "legacy_mini_cnn_PrivateTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 5.3972420699377466e-09,
+            "nll": 2.1447875364621893e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PrivateTest"
+        },
+        "legacy_mini_cnn_PublicTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 6.928059681499121e-09,
+            "nll": 8.877732164958019e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PublicTest"
+        },
+        "legacy_vgg_lite_PrivateTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 4.1528567806814465e-09,
+            "nll": 3.286454417494866e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PrivateTest"
+        },
+        "legacy_vgg_lite_PublicTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 6.957034115462335e-10,
+            "nll": 1.1570897529011859e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PublicTest"
+        },
+        "smoke_mini_cnn_PublicTest": {
+          "samples": 3589,
+          "absolute_differences": {
+            "accuracy": 0.0,
+            "macro_f1": 0.0,
+            "balanced_accuracy": 0.0,
+            "ece": 5.1831043346162176e-09,
+            "nll": 1.3484381589101702e-07
+          },
+          "within_1e-4": true,
+          "checkpoint_sha_matches": true,
+          "split": "PublicTest"
+        }
+      },
+      "export_hash_consistency": [
+        {
+          "file": "mini_cnn_best.pth",
+          "hash_matches": true,
+          "run_id": "legacy"
+        },
+        {
+          "file": "vgg_lite_best.pth",
+          "hash_matches": true,
+          "run_id": "legacy"
+        },
+        {
+          "file": "micro_resnet_best.pth",
+          "hash_matches": true,
+          "run_id": "legacy"
+        },
+        {
+          "file": "mini_cnn_20261007_022921_seed42.pth",
+          "hash_matches": true,
+          "run_id": "20261007_022921_seed42"
+        }
+      ]
+    },
+    "data_audit_reproduced": {
+      "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+      "csv_sha256_matches_frozen": true,
+      "split_counts": {
+        "Training": 28709,
+        "PublicTest": 3589,
+        "PrivateTest": 3589
+      },
+      "duplicate_pixel_stats": {
+        "duplicate_groups": 1516,
+        "excess_rows_beyond_unique": 1853,
+        "label_conflict_groups": 57
+      },
+      "cross_split_overlap": {
+        "Training__PublicTest": {
+          "unique_image_hashes": 270,
+          "rows_in_second_split": 280
+        },
+        "Training__PrivateTest": {
+          "unique_image_hashes": 278,
+          "rows_in_second_split": 288
+        },
+        "PublicTest__PrivateTest": {
+          "unique_image_hashes": 43,
+          "rows_in_second_split": 44
+        }
+      },
+      "sensitivity_analysis": {
+        "note": "仅作敏感性分析：不改变官方划分结果；本表不代表去重重训结果，不能与官方成绩混用",
+        "excluded_metric": "PrivateTest 中与 Training 像素完全相同的记录",
+        "excluded_rows_in_private_test": 288,
+        "results": {
+          "mini_cnn": {
+            "n_after_exclusion": 3301,
+            "accuracy": 0.6104210845198424,
+            "macro_f1": 0.5394550399091805
+          },
+          "vgg_lite": {
+            "n_after_exclusion": 3301,
+            "accuracy": 0.6395031808542866,
+            "macro_f1": 0.6029818242288487
+          },
+          "micro_resnet": {
+            "n_after_exclusion": 3301,
+            "accuracy": 0.6507119054831869,
+            "macro_f1": 0.6042017114102615
+          }
+        }
+      }
+    },
+    "windows_log_redirection": {
+      "default_encoding": "gbk",
+      "default_data_audit_exit_code": 1,
+      "error": "UnicodeEncodeError printing U+2194 before writing JSON",
+      "utf8_mode_data_audit_exit_code": 0,
+      "working_invocation": ".venv/Scripts/python.exe -X utf8 tools/data_audit.py --output <temporary-json>"
+    },
+    "source_inspection": {
+      "trainer_default_device_resolved_after_model_move": true,
+      "training_notebooks_validate_config_call_counts": {
+        "02_train_baseline.ipynb": 0,
+        "03_train_vgg.ipynb": 0,
+        "04_train_resnet.ipynb": 0
+      },
+      "diagnose_on_same_instance_before_fit": "02_train_baseline.ipynb only",
+      "declared_repository_url": "https://github.com/BernardW18/fer2013-emotion-recognition",
+      "actual_git_remote": "https://github.com/BernardW18/emotion_recognition.git",
+      "comparison_protocol_frozen": false,
+      "formal_three_model_three_seed_comparison_completed": false
+    },
+    "protected_artifacts": {
+      "checked_files": 40,
+      "all_unchanged": true,
+      "mismatches": [],
+      "sha256": {
+        "data\\fer2013.csv": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+        "training\\logs\\micro_resnet\\history.json": "958892a42800c694a595fb8b0996021530c2e4111677c76bd7d1293dc9928f27",
+        "training\\logs\\mini_cnn\\history.json": "2f5e56c9bc870c1a1ae0bcbdfd52e8b99ca772d98ce862687152e982bb4cca74",
+        "training\\logs\\vgg_lite\\history.json": "e7bdefc3314274a8b16e02ebd30d69f415bc2517ea9654e89e750652b4cf5132",
+        "training\\checkpoints\\micro_resnet\\checkpoint_epoch090_20260526_234029.pth": "f9a3a094e8def718963c1dfeb15808c092be9c90e5f16e3577c5e216bbc221a8",
+        "training\\checkpoints\\micro_resnet\\checkpoint_epoch090_20260526_234623.pth": "66e1f0f54ee5872788e942033e49a2f76cebebc9cf924c2929f8474e68e4d821",
+        "training\\checkpoints\\micro_resnet\\checkpoint_epoch095_20260526_234645.pth": "13f4eec8d4a270835c90db7990c741860cf623a66432784523b08861a7a99a35",
+        "training\\checkpoints\\micro_resnet\\checkpoint_epoch100_20260526_234713.pth": "ae2c86e8e2cac0c11884d330ad2419c87eec9e9d42e7dd400e633643702dc159",
+        "training\\checkpoints\\micro_resnet\\checkpoint_epoch105_20260526_234743.pth": "7e2ca847f89708a1aedb2b67bde80ffd8453ecf21ff202055aad175001eb5192",
+        "training\\checkpoints\\micro_resnet\\global_best.pth": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698",
+        "training\\checkpoints\\micro_resnet\\interrupted_epoch001_20260515_174039.pth": "0c95f798d714a3652b22ecd748ca9017e49dad07c536713b99d573802424fa33",
+        "training\\checkpoints\\micro_resnet\\interrupted_epoch003_20260517_185418.pth": "fb907ab2afb5ad06403dac01fc998ac6509b23f77cf73c6ea97b936e5b913f4d",
+        "training\\checkpoints\\micro_resnet\\interrupted_epoch006_20260517_180234.pth": "61f986ee3cc1e5c64e10fd21cacb454a812540c875145f31157ff3feb0513502",
+        "training\\checkpoints\\micro_resnet\\interrupted_epoch087_20260517_184023.pth": "675f75effb81985e811e910608dc915fe4ef6f2ecd554cc66058db6c55de0a1d",
+        "training\\checkpoints\\micro_resnet\\interrupted_epoch090_20260518_145234.pth": "c2257aab50ad19ad5de70ecd758fbf46e4ca78a85581d79eb5619fe650c13e3d",
+        "training\\checkpoints\\micro_resnet\\local_best.pth": "92a62faf2ac75014da3882e88e4905434ec9b2dba99b7db0f822b611ad8b2cc8",
+        "training\\checkpoints\\mini_cnn\\checkpoint_epoch040_20260520_164954.pth": "2929ec0108b3d4934d97ac84ae1c873389bc102608a383e88b9dcd402b7265de",
+        "training\\checkpoints\\mini_cnn\\checkpoint_epoch045_20260520_165015.pth": "1e4f4173be7b50611025bc944332017766add08479a2d9fe6c04a27249e1ba7c",
+        "training\\checkpoints\\mini_cnn\\checkpoint_epoch050_20260520_165036.pth": "90de2cf2613ba3b3c93e678b79aefd3f2d449033de9734f2bd2d50e975528ac8",
+        "training\\checkpoints\\mini_cnn\\checkpoint_epoch055_20260520_165056.pth": "0a70a97d5af53c03da7b48a3dab440a6618e36d887ad93e1116eb4c80712cbbe",
+        "training\\checkpoints\\mini_cnn\\checkpoint_epoch060_20260520_165117.pth": "7fdd812a40a4013749e86adb7fae602dc88b2255828e6c384242504626db9387",
+        "training\\checkpoints\\mini_cnn\\global_best.pth": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",
+        "training\\checkpoints\\mini_cnn\\local_best.pth": "5245051511101ce461f8b097eb64fd9daf8e00ef6e716dbed40152c248add637",
+        "training\\checkpoints\\vgg_lite\\checkpoint_epoch110_20260519_233113.pth": "8ac1c971107cbf8ef68703f7a9617da6ba00f292aed54e498e7e84693fbdadf0",
+        "training\\checkpoints\\vgg_lite\\checkpoint_epoch115_20260519_233136.pth": "2470900972d75c326f113219a9d10241488c07501f74ac4fd20bfccd9c1cecca",
+        "training\\checkpoints\\vgg_lite\\checkpoint_epoch120_20260519_233200.pth": "3f880ba0dcb7ae83eac37d1f1bb2c05ed1ae588376f0d7674e83a39ef378e383",
+        "training\\checkpoints\\vgg_lite\\checkpoint_epoch125_20260519_233223.pth": "3230f8bccbf7170efb92bb40d2edd63602c739991183ad09235b4e52fb939998",
+        "training\\checkpoints\\vgg_lite\\checkpoint_epoch130_20260519_233246.pth": "5af9db2d5f3b80b895117243bff534afbd681500975a918eea26d2a9889e963c",
+        "training\\checkpoints\\vgg_lite\\global_best.pth": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7",
+        "training\\checkpoints\\vgg_lite\\local_best.pth": "4ba56240fdb446197c56d3cbde8d2255345ce0a5f805efbbdec33d5bf9a4b962",
+        "inference\\saved_models\\export_manifest.json": "e399494ed62aec5cd2e8c6330cd835a15400a91fd2bb8726be5d04a87fc8a0c6",
+        "inference\\saved_models\\micro_resnet_best.pth": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698",
+        "inference\\saved_models\\mini_cnn_20261007_022921_seed42.pth": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb",
+        "inference\\saved_models\\mini_cnn_best.pth": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",
+        "inference\\saved_models\\vgg_lite_best.pth": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7",
+        "training\\runs\\mini_cnn\\20261007_022921_seed42\\config_effective.yaml": "8a26ce2d04c82748fdd62e4b411f016e9e1a11b097b31b27999b5a8f9de66620",
+        "training\\runs\\mini_cnn\\20261007_022921_seed42\\history.json": "c1c1429b990fc961850a0b51e31adaa0a3451cc4c32877de33fb7e02bf53d4cc",
+        "training\\runs\\mini_cnn\\20261007_022921_seed42\\run_meta.json": "7afc8ab17b278cb0b28e8c3dbabd58fac4bc388130ab98bea292e457945cbc3d",
+        "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\best.pth": "4b2cc443779030124ec8cc4f58e771d4279134fad9b5b2dc5bf152f20b7682eb",
+        "training\\runs\\mini_cnn\\20261007_022921_seed42\\checkpoints\\last.pth": "0f3719393f87d033bee5b2d1189a651cfd42bd54855401be8796d9d50b59f682"
+      }
+    },
+    "findings": [
+      {
+        "id": "R01",
+        "priority": "P1",
+        "original_items": [
+          "F09"
+        ],
+        "status": "rework",
+        "issue": "persistent-worker resume diverges from continuous training"
+      },
+      {
+        "id": "R02",
+        "priority": "P1",
+        "original_items": [
+          "F05",
+          "F09"
+        ],
+        "status": "rework",
+        "issue": "resume accepts changed config/data and preserves stale metadata"
+      },
+      {
+        "id": "R03",
+        "priority": "P1",
+        "original_items": [
+          "F09",
+          "F12"
+        ],
+        "status": "rework",
+        "issue": "notebook diagnose updates formal state outside history"
+      },
+      {
+        "id": "R04",
+        "priority": "P1",
+        "original_items": [
+          "F09"
+        ],
+        "status": "rework",
+        "issue": "repeated fit repeats epoch numbers and overwrites periodic checkpoint"
+      },
+      {
+        "id": "R05",
+        "priority": "P1",
+        "original_items": [],
+        "status": "rework",
+        "issue": "omitted device selects CUDA but leaves model on CPU"
+      },
+      {
+        "id": "R06",
+        "priority": "P1",
+        "original_items": [
+          "F13"
+        ],
+        "status": "rework",
+        "issue": "augmentation master switch does not disable MixUp"
+      },
+      {
+        "id": "R07",
+        "priority": "P1",
+        "original_items": [
+          "F13",
+          "F18"
+        ],
+        "status": "rework",
+        "issue": "Notebook/API bypass validation and validator accepts NaN"
+      },
+      {
+        "id": "R08",
+        "priority": "P1",
+        "original_items": [
+          "F07",
+          "F11"
+        ],
+        "status": "prerequisites_and_experiments_pending",
+        "issue": "ordinary CE baseline and comparison budget are not configured/frozen"
+      },
+      {
+        "id": "R09",
+        "priority": "P2",
+        "original_items": [
+          "F02",
+          "F18",
+          "F19"
+        ],
+        "status": "partially_corrected_review_remaining_materials_pending",
+        "issue": "repository links, comparison provenance, claim scope and Windows logging"
+      }
+    ],
+    "limitations": [
+      "No fresh environment installation or dependency download repeated.",
+      "No formal FER2013 retraining or new model/dataset/research question.",
+      "Saved predictions were recomputed; full checkpoint forward evaluation was not repeated.",
+      "Existing AMP benchmark reviewed without rerunning full benchmark.",
+      "Persistent-worker reproduction uses two workers and synthetic data; full default four-worker training not run.",
+      "DOCX/PPT binary materials were not edited or comprehensively re-audited.",
+      "No fixes to implementation were made in this review."
+    ],
+    "temporary_validation_files_removed": true
   }
 }

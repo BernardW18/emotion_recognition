@@ -30,6 +30,7 @@ import torch
 
 from training.checkpoint import write_json_atomic
 from utils.model_spec import file_sha256, resolve_spec_from_checkpoint
+from utils.stdio import ensure_utf8_stdio
 
 SAVED_DIR = PROJECT_ROOT / "inference" / "saved_models"
 MANIFEST_PATH = SAVED_DIR / "export_manifest.json"
@@ -146,6 +147,7 @@ def list_exports() -> None:
 
 
 def main():
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(description="导出模型断点到推理目录（附来源清单）")
     parser.add_argument("--checkpoint", type=str, default=None, help="源断点路径")
     parser.add_argument("--name", type=str, default=None,

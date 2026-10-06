@@ -15,6 +15,7 @@
 __all__ = ["ConfigValidationError", "validate_config", "SUPPORTED_MODELS"]
 
 import logging
+import math
 from typing import Any, NoReturn
 
 from utils.activations import ACTIVATION_REGISTRY
@@ -58,7 +59,7 @@ _ALLOWED_CHECKPOINT_KEYS = {
 
 _OPTIMIZERS = {"adam", "adamw", "sgd"}
 _SCHEDULERS = {"cosine", "cosine_warm", "step", "plateau", "none"}
-_LOSS_TYPES = {"focal", "cb_focal"}
+_LOSS_TYPES = {"focal", "cb_focal", "cross_entropy"}
 _MONITOR_METRICS = {"val_acc", "val_loss"}
 _TORCH_COMPILE_MODES = {"default", "reduce-overhead", "max-autotune"}
 
@@ -85,6 +86,15 @@ def _ensure_section(config: dict, key: str, allowed: set) -> dict:
     return value
 
 
+def _optional_section(config: dict, key: str, allowed: set) -> dict:
+    """可缺省段：缺省时按空段处理（各调用点使用默认值）；提供了就必须合法。"""
+    value = config.get(key, {})
+    if not isinstance(value, dict):
+        _fail(key, f"必须是配置段（dict），得到 {type(value).__name__}")
+    _check_unknown(value, allowed, key)
+    return value
+
+
 def _ensure_bool(value: Any, path: str) -> bool:
     if not isinstance(value, bool):
         _fail(path, f"必须是布尔值 true/false，得到 {value!r}")
@@ -103,6 +113,8 @@ def _ensure_number(value: Any, path: str, *, min_value: float | None = None,
                    exclusive_min: bool = False, max_value: float | None = None) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         _fail(path, f"必须是数值，得到 {value!r}")
+    if not math.isfinite(float(value)):
+        _fail(path, f"必须是有限数值（不允许 NaN/Inf），得到 {value!r}")
     value = float(value)
     if min_value is not None:
         if exclusive_min and value <= min_value:
@@ -153,7 +165,7 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
         _fail("data.dataset_path", f"必须是非空字符串，得到 {data.get('dataset_path')!r}")
 
     # ---------------- dataloader ----------------
-    dl = _ensure_section(config, "dataloader", _ALLOWED_DATALOADER_KEYS)
+    dl = _optional_section(config, "dataloader", _ALLOWED_DATALOADER_KEYS)
     num_workers = _ensure_int(dl.get("num_workers", 0), "dataloader.num_workers", min_value=0)
     _ensure_bool(dl.get("pin_memory", True), "dataloader.pin_memory")
     _ensure_bool(dl.get("persistent_workers", False), "dataloader.persistent_workers")
@@ -164,7 +176,7 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
     # num_workers=0 时 persistent_workers/prefetch_factor 由 create_dataloaders 自动关闭并提示
 
     # ---------------- augmentation ----------------
-    aug = _ensure_section(config, "augmentation", _ALLOWED_AUG_KEYS)
+    aug = _optional_section(config, "augmentation", _ALLOWED_AUG_KEYS)
     _ensure_bool(aug.get("enabled", False), "augmentation.enabled")
     for key in ("random_horizontal_flip", "random_affine_translate", "color_jitter_brightness",
                 "color_jitter_contrast"):
@@ -193,6 +205,13 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
     if "augment_prob" in class_spec:
         _ensure_number(class_spec["augment_prob"], "augmentation.class_specific.augment_prob",
                        min_value=0.0, max_value=1.0)
+    if "extra_rotation" in class_spec:
+        _ensure_number(class_spec["extra_rotation"],
+                       "augmentation.class_specific.extra_rotation", min_value=0.0)
+    for key in ("extra_translate", "extra_erase_prob"):
+        if key in class_spec:
+            _ensure_number(class_spec[key], f"augmentation.class_specific.{key}",
+                           min_value=0.0, max_value=1.0)
 
     mixup = aug.get("mixup", {})
     if not isinstance(mixup, dict):
@@ -284,7 +303,7 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
                 _fail(f"models.{name}.use_se", f"{name} 不支持 SE 模块")
 
     # ---------------- checkpoint ----------------
-    ckpt = _ensure_section(config, "checkpoint", _ALLOWED_CHECKPOINT_KEYS)
+    ckpt = _optional_section(config, "checkpoint", _ALLOWED_CHECKPOINT_KEYS)
     _ensure_bool(ckpt.get("save_best", True), "checkpoint.save_best")
     _ensure_int(ckpt.get("save_every_n_epochs", 5), "checkpoint.save_every_n_epochs", min_value=1)
     _ensure_choice(
@@ -296,5 +315,7 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
     seed = config.get("seed")
     if isinstance(seed, bool) or not isinstance(seed, int):
         _fail("seed", f"必须是整数，得到 {seed!r}")
+    if not 0 <= seed < 2**32:
+        _fail("seed", f"必须在 [0, 2^32) 范围内（torch 手动种子要求），得到 {seed}")
 
     logger.debug("配置校验通过（model_name=%s）", model_name)

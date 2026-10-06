@@ -30,6 +30,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 
 from utils.model_spec import file_sha256
+from utils.stdio import ensure_utf8_stdio
 
 OFFICIAL_SPLITS = ("Training", "PublicTest", "PrivateTest")
 CROSS_PAIRS = (
@@ -84,6 +85,7 @@ def _sensitivity_analysis(df: pd.DataFrame) -> dict | None:
 
 
 def main():
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(description="FER2013 官方协议数据审计（F03）")
     parser.add_argument("--csv", type=str, default=str(DEFAULT_CSV))
     parser.add_argument("--output", type=str, default=str(DEFAULT_OUTPUT))

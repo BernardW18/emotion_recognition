@@ -5,7 +5,7 @@
 基于 PyTorch 的人脸表情识别系统：三个 CNN 模型（MiniCNN / VGGLite / MicroResNet）的训练、
 统一评估与对比，以及 Streamlit 推理演示应用。
 
-仓库：<https://github.com/BernardW18/fer2013-emotion-recognition>
+仓库：<https://github.com/BernardW18/emotion_recognition>（实际 remote）
 
 **核心栈**: PyTorch + Streamlit + Jupyter + scikit-learn
 
@@ -25,7 +25,10 @@
   权重/划分哈希（全部可复算，含 ECE/NLL）。
 - **显式导出 + 来源清单**：`tools/export_model.py` 导出到推理目录并登记
   `export_manifest.json`（run、SHA-256、model_spec、指标），默认不覆盖同名文件。
-- **质量门槛**：pytest（75 项）+ ruff + mypy 全部通过。
+- **恢复保护**：恢复训练前逐项比对训练协议（损失/采样/增强/batch/优化器/调度器/
+  monitor/精度/数据指纹），配置或数据变化将被拒绝（换策略请新建 run）；
+  精确恢复（与连续训练逐批一致）的实测支持范围为 `num_workers=0`。
+- **质量门槛**：pytest（112 项）+ ruff + mypy 全部通过。
 
 ---
 
@@ -54,12 +57,14 @@ emotion_recognition/
 ├── utils/                       # 公共工具模块
 │   ├── model_spec.py            # 模型规格与统一构造/加载（F01）
 │   ├── evaluation.py            # 统一评估入口（F10）
-│   ├── config_validation.py     # 配置集中校验（F13）
+│   ├── config_validation.py     # 配置集中校验（F13/R07）
+│   ├── stdio.py                 # 控制台/日志 UTF-8 统一（R09）
 │   ├── activations.py           # 激活函数工厂
 │   ├── losses.py                # Focal Loss + CB Focal Loss
 │   └── constants.py             # 类别名称 / Emoji
 ├── configs/
-│   └── training_config.yaml     # 集中式训练配置（YAML）
+│   ├── training_config.yaml     # 集中式训练配置（YAML）
+│   └── baseline_config.yaml     # CE 基线配置（R08：普通采样 + 关类别增强）
 ├── tools/                       # 工具脚本
 │   ├── export_model.py          # 导出权重到推理目录（附来源清单）
 │   ├── evaluate_checkpoint.py   # 统一评估入口的 CLI 包装
@@ -75,7 +80,7 @@ emotion_recognition/
 │   └── confusion_matrices/  roc_curves/  training_curves/
 ├── docs/
 │   └── data_audit.md            # 数据重复披露与去重协议草案
-├── tests/                       # 测试（75 项：核心/训练管线/推理/应用/配置校验）
+├── tests/                       # 测试（112 项：核心/训练管线/推理/应用/配置校验）
 ├── pyproject.toml               # 项目配置 + ruff + mypy
 ├── requirements.txt             # 依赖安装入口（CUDA 组合）
 └── README.md
@@ -138,8 +143,12 @@ Checkpoint 选择器（列出 `training/runs/` 下的可续训断点）。
 - **继续**：`--resume auto`（最新完整 `last.pth`）或指定断点路径。
 - **停止**：早停自动触发（原因记录在 run 元数据与输出）。
 - **产物**：`training/runs/<模型>/<run_id>/`：`config_effective.yaml`、`run_meta.json`
-  （CLI 参数 / seed / git / 环境 / 数据指纹 / 状态）、`history.json`、
+  （CLI 参数 / seed / git / 环境 / 数据指纹 / 状态 / 恢复事件）、`history.json`、
   `checkpoints/{last,best,epoch_*,interrupted_*}.pth`。
+- **精确续训的支持范围**：`num_workers=0`（单进程数据管线；批次顺序与增强随机性由
+  可保存/恢复的 RNG 驱动，回归测试覆盖普通/增强/加权采样组合）。恢复训练时若配置为
+  多进程，会自动调整为 0 并记录在 `run_meta.resume_events`；多进程数据管线下的恢复
+  一致性不作承诺。恢复前比对训练协议，任何配置/数据变化都会被拒绝。
 
 ### 4. 评估
 
@@ -255,7 +264,7 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 | 类别特定增强 | 对 Disgust 类 80% 概率额外旋转+平移+擦除 |
 | MixUp | Beta 分布批内混合，默认关闭 |
 | 类别平衡 | WeightedRandomSampler（与 CB Focal 共用同一份划分统计） |
-| 损失函数 | Focal Loss / CB Focal Loss（class_counts 由划分动态统计） |
+| 损失函数 | Focal / CB Focal / **CrossEntropy（CE 基线，`configs/baseline_config.yaml`）** |
 | 混合精度 | AMP ON/OFF（GPU 自动启用，由配置与 CLI 覆盖） |
 | 早停 | val_acc 无改善 + val_loss 恶化双监控（=0 禁用） |
 | Checkpoint | save_best / monitor_metric(val_acc/val_loss) / 定期断点清理 |
@@ -270,7 +279,7 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 - **数据分析**: Jupyter Notebook + Pandas + Matplotlib + Seaborn
 - **评估**: scikit-learn（混淆矩阵 / ROC / 分类报告）+ 自实现 ECE/NLL
 - **可解释性**: Grad-CAM 热力图（纯手写，无第三方依赖）
-- **质量保证**: pytest（75 项）+ ruff + mypy（全部通过）
+- **质量保证**: pytest（112 项）+ ruff + mypy（全部通过）
 
 ## 项目状态与限制
 
@@ -279,8 +288,10 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
   已有明确标注与迁移说明）。
 - `training/checkpoints/`、`training/logs/` 为 legacy 历史产物（只读保留），
   新训练一律写入 `training/runs/`。
-- 2026-10-07 完成一次**流程验证短训练**（mini_cnn，run `20261007_022921_seed42`，
-  共 2 epochs：训练 → `--resume auto` 续训 → 导出 → 统一评估）。
-  该 run 仅验证保存/恢复/导出/评估闭环可用；其分数（PublicTest 34.63%）
-  **不代表正式结果**，已在 export_manifest 中标注来源。
+- 2026-10-07 完成两次**流程验证短训练**（mini_cnn：`20261007_022921_seed42` 与
+  `20261007_031251_seed42`，各 2 epochs：训练 → `--resume auto` 续训（含精确恢复
+  条件调整与记录）→ 导出 → 统一评估）。两个 run 仅验证保存/恢复/导出/评估闭环可用；
+  其分数（PublicTest 34.63% / 36.89%）**不代表正式结果**，已在 export_manifest 中标注来源。
+- 课程报告 DOCX / PPT **未修改**（用户决定拒绝修改 word/ppt，可询问用户核实）；
+  个人贡献清单未单独成文。
 - 课程报告 DOCX / PPT 本轮未同步（如需可基于本 README 与 `docs/` 更新）。

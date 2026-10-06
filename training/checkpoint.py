@@ -215,6 +215,24 @@ def _restore_rng_state(state: dict) -> list[str]:
     return failed
 
 
+def _protocol_diff(reference: dict, current: dict, path: str = "") -> list[str]:
+    """递归比较两个训练协议快照，返回差异描述列表（R02）。"""
+    diffs: list[str] = []
+    for key in sorted(set(reference) | set(current)):
+        full = f"{path}{key}"
+        if key not in reference:
+            diffs.append(f"{full}: 断点中缺失（当前={current[key]!r}）")
+        elif key not in current:
+            diffs.append(f"{full}: 当前缺失（断点={reference[key]!r}）")
+        else:
+            ref_value, cur_value = reference[key], current[key]
+            if isinstance(ref_value, dict) and isinstance(cur_value, dict):
+                diffs.extend(_protocol_diff(ref_value, cur_value, path=f"{full}."))
+            elif ref_value != cur_value:
+                diffs.append(f"{full}: 断点={ref_value!r} ≠ 当前={cur_value!r}")
+    return diffs
+
+
 def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool = False):
     """
     保存完整训练状态（原子写入）。
@@ -240,6 +258,8 @@ def save_checkpoint(trainer, path, *, history: dict | None = None, partial: bool
         "run_id": getattr(trainer, "run_id", ""),
         "model_name": trainer.model_name,
         "model_spec": trainer.model_spec.to_dict(),
+        # R02：训练协议快照（恢复前逐项比对，防止换配置续写原 run）
+        "training_protocol": trainer.get_training_protocol(),
         # torch.compile 的 OptimizedModule 会加 "_orig_mod." 前缀，保存前展开
         "model_state_dict": getattr(trainer.model, "_orig_mod", trainer.model).state_dict(),
         "optimizer_state_dict": trainer.optimizer.state_dict(),
@@ -314,6 +334,15 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             f"如确需使用: {checkpoint_path}，请先迁移或从头训练。"
         )
 
+    # R01：精确恢复支持范围检查——多进程数据管线下的恢复一致性未获实测支持
+    loader_workers = getattr(trainer.train_loader, "num_workers", 0)
+    if loader_workers:
+        raise RuntimeError(
+            f"精确恢复要求 num_workers=0（当前 train_loader.num_workers={loader_workers}）。\n"
+            "请先调用 training.trainer.enforce_exact_resume_conditions(config) 并重建 "
+            "DataLoader，或新建 run；多进程数据管线下的恢复一致性不支持。"
+        )
+
     # 模型名与规格校验
     ckpt_model_name = checkpoint.get("model_name", "")
     if ckpt_model_name and ckpt_model_name != trainer.model_name:
@@ -332,6 +361,25 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
             f"  当前配置 : {current_spec}\n"
             "请使用与断点一致的数据/模型配置，或从头训练。"
         )
+
+    # R02：训练协议比对（损失/采样/增强/批/累积/优化器/调度器/monitor/精度/数据指纹）
+    ckpt_protocol = checkpoint.get("training_protocol")
+    protocol_verified = True
+    protocol_notes: list[str] = []
+    if ckpt_protocol is None:
+        protocol_verified = False
+        protocol_notes.append(
+            "断点缺少 training_protocol 记录（早于协议比对引入的版本）："
+            "无法验证配置与数据一致性，本次恢复标记为「协议未验证」"
+        )
+        logger.warning("  - %s", protocol_notes[-1])
+    else:
+        protocol_diffs = _protocol_diff(ckpt_protocol, trainer.get_training_protocol())
+        if protocol_diffs:
+            raise RuntimeError(
+                "恢复被拒绝：训练协议与断点不一致（改动训练策略请新建 run）：\n  - "
+                + "\n  - ".join(protocol_diffs)
+            )
 
     # 恢复模型权重（torch.compile 场景同样展开到原始模块）
     try:
@@ -416,6 +464,11 @@ def load_checkpoint(trainer, checkpoint_path) -> dict:
     logger.info("  - 将从 epoch %d 继续训练", trainer.start_epoch)
     if rng_failed:
         logger.warning("  - RNG 恢复不完整: %s（批次顺序可能不一致）", rng_failed)
+
+    # R02：恢复成功后才写恢复事件（此前任何失败都不会改写原 run 元数据）
+    trainer._record_resume_event(
+        checkpoint_path, protocol_verified=protocol_verified, notes=protocol_notes
+    )
 
     return checkpoint
 

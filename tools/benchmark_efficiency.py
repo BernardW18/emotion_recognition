@@ -34,6 +34,7 @@ from PIL import Image
 from inference.infer_utils import preprocess_image
 from training.trainer import load_config
 from utils.model_spec import build_model_from_spec, count_parameters, make_spec_from_config
+from utils.stdio import ensure_utf8_stdio
 
 WARMUP = 10
 REPEAT = 100
@@ -119,6 +120,7 @@ def _train_peak_vram_mb(model, batch_size, device, steps=5):
 
 
 def main():
+    ensure_utf8_stdio()
     config = load_config()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     devices = [device]

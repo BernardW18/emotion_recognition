@@ -63,7 +63,7 @@ training:
   patience: 10                     # val_acc 早停：连续 N 轮无改善则停止；0 = 禁用
   val_loss_patience: 15            # val_loss 恶化早停：连续 N 轮高于历史最优的 threshold 倍则停止；0 = 禁用
   val_loss_threshold: 1.05         # val_loss 恶化倍率（必须 >1；1.05 = 高于历史最优 5% 视为恶化）
-  loss_type: "focal"               # 损失函数: "focal" (标准 Focal) / "cb_focal" (Class-Balanced Focal)
+  loss_type: "focal"               # 损失函数: "focal" / "cb_focal" / "cross_entropy"（CE 基线，配 configs/baseline_config.yaml）
   cb_focal_beta: 0.999             # CB Focal Loss 的 beta 参数（仅在 loss_type="cb_focal" 时生效）
   amp: true                       # 混合精度训练（GPU 自动启用，CPU 无效）
   torch_compile: false             # torch.compile 编译模型（Windows 不支持，自动跳过）
@@ -76,21 +76,21 @@ training:
 models:
   mini_cnn:
     learning_rate: 0.0005
-    batch_size: 256               # ~50K 参数，独显直连可加大 batch
+    batch_size: 256               # 1.27M 参数，独显直连可加大 batch（实测参数量）
     num_epochs: 30
     dropout: 0.3
     activation: "relu"
 
   vgg_lite:
     learning_rate: 0.0003
-    batch_size: 128               # ~1.5M 参数，独显直连适度加大
+    batch_size: 128               # 5.41M 参数，独显直连适度加大（实测参数量）
     num_epochs: 90
     dropout: 0.5
     activation: "relu"
 
   micro_resnet:
     learning_rate: 0.0003
-    batch_size: 128               # ~400K 参数，独显直连可加大
+    batch_size: 128               # 754K 参数，独显直连可加大（实测参数量）
     num_epochs: 90
     dropout: 0.3
     activation: "gelu"
