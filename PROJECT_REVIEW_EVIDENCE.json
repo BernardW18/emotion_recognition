@@ -1,0 +1,896 @@
+{
+  "checked_on": "2026-10-07",
+  "project_root": "D:\\Document\\Unniversity\\emotion_recognition",
+  "csv_columns": [
+    "emotion",
+    "pixels",
+    "Usage"
+  ],
+  "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+  "split_counts": {
+    "Training": 28709,
+    "PublicTest": 3589,
+    "PrivateTest": 3589
+  },
+  "class_counts": {
+    "Training": {
+      "0": 3995,
+      "2": 4097,
+      "4": 4830,
+      "6": 4965,
+      "3": 7215,
+      "5": 3171,
+      "1": 436
+    },
+    "PublicTest": {
+      "0": 467,
+      "1": 56,
+      "4": 653,
+      "6": 607,
+      "3": 895,
+      "2": 496,
+      "5": 415
+    },
+    "PrivateTest": {
+      "0": 491,
+      "5": 416,
+      "6": 626,
+      "4": 594,
+      "2": 528,
+      "3": 879,
+      "1": 55
+    }
+  },
+  "invalid_rows": [],
+  "identical_pixel_duplicate_groups": 1516,
+  "identical_pixel_duplicate_excess_rows": 1853,
+  "identical_pixels_conflicting_labels_groups": 57,
+  "identical_pixels_cross_split_overlap": {
+    "Training__PublicTest": {
+      "unique_image_hashes": 270,
+      "rows_in_second_split": 280
+    },
+    "Training__PrivateTest": {
+      "unique_image_hashes": 278,
+      "rows_in_second_split": 288
+    },
+    "PublicTest__PrivateTest": {
+      "unique_image_hashes": 43,
+      "rows_in_second_split": 44
+    }
+  },
+  "notebooks": [
+    {
+      "path": "training\\notebooks\\01_eda.ipynb",
+      "kernel": {
+        "display_name": "Python 3",
+        "language": "python",
+        "name": "python3"
+      },
+      "classification_outputs": []
+    },
+    {
+      "path": "training\\notebooks\\02_train_baseline.ipynb",
+      "kernel": {
+        "display_name": "Python 3",
+        "language": "python",
+        "name": "python3"
+      },
+      "classification_outputs": [
+        {
+          "cell": 7,
+          "execution_count": 4,
+          "text": "\n==================================================\n🔍 性能诊断 | 3 步预热 + 5 步采样 | 设备: cuda\n   AMP: True | Compile: False\n   cudnn.benchmark: True\n   cudnn.deterministic: False\n   float32_matmul_precision: high\n   batch_size: 256\n   GPU: NVIDIA GeForce RTX 5070 Ti Laptop GPU\n==================================================\n   预热 1/3: 3631ms\n   预热 2/3: 11ms\n   预热 3/3: 10ms\n\n阶段              平均(ms)       最小(ms)       最大(ms)      \n---------------------------------------------------\ndata_load             0.27        0.23        0.30\nforward               2.29        2.07        2.75\nbackward              5.26        5.00        5.80\noptimizer             1.47        1.34        1.66\neval (全部)           793.41                           \n\n   预热阶段平均: 1218ms/步 → 采样阶段平均: 9ms/步\n   VRAM: 81MB / 354MB peak\n---------------------------------------------------\n单步总计                  9.29 ms\n预估稳态速度          ~108 it/s\n\n💡 诊断建议:\n   ✅ 速度正常（108 it/s）\n==================================================\n\n"
+        },
+        {
+          "cell": 8,
+          "execution_count": 4,
+          "text": "\n============================================================\n模型: mini_cnn | 参数量: 1,274,823\n设备: cuda | AMP: True | Compile: False\n   matmul_precision: high\n从头训练: 共 60 轮 → 训练至第 60 轮\n============================================================\n\n                                                                                     \r[Epoch 1 | 本轮 1/60] Train: 1.3233/0.2698 | Val: 1.1592/0.3399 (T5:0.9390) | LR: 0.000500 | 24s | ETA 23m50s *\n                                                                                     \r[Epoch 2 | 本轮 2/60] Train: 1.1215/0.3642 | Val: 1.1407/0.3586 (T5:0.9329) | LR: 0.000499 | 4s | ETA 13m46s *\n                                                                                     \r[Epoch 3 | 本轮 3/60] Train: 1.0420/0.4071 | Val: 1.0012/0.4338 (T5:0.9498) | LR: 0.000495 | 4s | ETA 10m22s *\n                                                                                     \r[Epoch 4 | 本轮 4/60] Train: 0.9999/0.4300 | Val: 0.9165/0.4622 (T5:0.9607) | LR: 0.000488 | 4s | ETA 8m37s *\n                                                                                     \r[Epoch 5 | 本轮 5/60] Train: 0.9700/0.4412 | Val: 0.9784/0.4327 (T5:0.9498) | LR: 0.000478 | 4s | ETA 7m33s\n                                                                                     \r[Epoch 6 | 本轮 6/60] Train: 0.9470/0.4496 | Val: 0.8346/0.4884 (T5:0.9716) | LR: 0.000467 | 4s | ETA 6m52s *\n                                                                                     \r[Epoch 7 | 本轮 7/60] Train: 0.9232/0.4632 | Val: 0.8325/0.4987 (T5:0.9735) | LR: 0.000452 | 5s | ETA 6m27s *\n                                                                                     \r[Epoch 8 | 本轮 8/60] Train: 0.9072/0.4743 | Val: 0.8534/0.4937 (T5:0.9660) | LR: 0.000436 | 4s | ETA 6m05s\n                                                                                     \r[Epoch 9 | 本轮 9/60] Train: 0.8788/0.4829 | Val: 0.8358/0.4890 (T5:0.9735) | LR: 0.000417 | 5s | ETA 5m52s\n                                                                                      \r[Epoch 10 | 本轮 10/60] Train: 0.8702/0.4838 | Val: 0.9543/0.4539 (T5:0.9485) | LR: 0.000397 | 6s | ETA 5m41s\n                                                                                      \r[Epoch 11 | 本轮 11/60] Train: 0.8481/0.4993 | Val: 0.9078/0.4790 (T5:0.9607) | LR: 0.000375 | 6s | ETA 5m31s\n                                                                                      \r[Epoch 12 | 本轮 12/60] Train: 0.8429/0.5028 | Val: 0.7589/0.5261 (T5:0.9772) | LR: 0.000352 | 6s | ETA 5m22s *\n                                                                                      \r[Epoch 13 | 本轮 13/60] Train: 0.8322/0.4976 | Val: 0.7753/0.5208 (T5:0.9741) | LR: 0.000327 | 6s | ETA 5m12s\n                                                                                      \r[Epoch 14 | 本轮 14/60] Train: 0.8203/0.5103 | Val: 0.7404/0.5341 (T5:0.9799) | LR: 0.000302 | 6s | ETA 5m04s *\n                                                                                      \r[Epoch 15 | 本轮 15/60] Train: 0.8151/0.5131 | Val: 0.7427/0.5389 (T5:0.9791) | LR: 0.000276 | 6s | ETA 4m55s *\n                                                                                      \r[Epoch 16 | 本轮 16/60] Train: 0.7954/0.5186 | Val: 0.8263/0.5091 (T5:0.9730) | LR: 0.000250 | 6s | ETA 4m47s\n                                                                                      \r[Epoch 17 | 本轮 17/60] Train: 0.7860/0.5271 | Val: 0.741"
+        },
+        {
+          "cell": 12,
+          "execution_count": 6,
+          "text": "分类报告:\n              precision    recall  f1-score   support\n\n       Angry       0.55      0.57      0.56       491\n     Disgust       0.63      0.53      0.57        55\n        Fear       0.43      0.29      0.35       528\n       Happy       0.87      0.83      0.85       879\n         Sad       0.48      0.50      0.49       594\n    Surprise       0.65      0.81      0.72       416\n     Neutral       0.57      0.63      0.60       626\n\n    accuracy                           0.62      3589\n   macro avg       0.59      0.59      0.59      3589\nweighted avg       0.61      0.62      0.61      3589\n\n<Figure size 1000x800 with 2 Axes>"
+        }
+      ]
+    },
+    {
+      "path": "training\\notebooks\\03_train_vgg.ipynb",
+      "kernel": {
+        "display_name": "Python 3",
+        "language": "python",
+        "name": "python3"
+      },
+      "classification_outputs": [
+        {
+          "cell": 7,
+          "execution_count": 4,
+          "text": "\n============================================================\n模型: vgg_lite | 参数量: 5,407,687\n设备: cuda | AMP: True | Compile: False\n   matmul_precision: high\n权重已训练: 81 轮 | 本次续训: 60 轮 → 训练至第 141 轮\n之前累计用时: 6m41s\n============================================================\n\n                                                                                      \r[Epoch 82 | 本轮 1/60] Train: 0.6073/0.6150 | Val: 0.6203/0.6222 (T5:0.9916) | LR: 0.000050 | 25s | ETA 5m11s *\n                                                                                      \r[Epoch 83 | 本轮 2/60] Train: 0.6444/0.5985 | Val: 0.6210/0.6130 (T5:0.9891) | LR: 0.000299 | 4s | ETA 5m05s\n                                                                                      \r[Epoch 84 | 本轮 3/60] Train: 0.6438/0.5952 | Val: 0.6470/0.6052 (T5:0.9877) | LR: 0.000297 | 4s | ETA 4m59s\n                                                                                      \r[Epoch 85 | 本轮 4/60] Train: 0.6360/0.5988 | Val: 0.6279/0.6160 (T5:0.9863) | LR: 0.000293 | 4s | ETA 4m53s\n                                                                                      \r[Epoch 86 | 本轮 5/60] Train: 0.6509/0.5956 | Val: 0.6450/0.5974 (T5:0.9877) | LR: 0.000287 | 4s | ETA 4m48s\n                                                                                      \r[Epoch 87 | 本轮 6/60] Train: 0.6352/0.6013 | Val: 0.6501/0.6080 (T5:0.9889) | LR: 0.000280 | 4s | ETA 4m42s\n                                                                                      \r[Epoch 88 | 本轮 7/60] Train: 0.6318/0.5996 | Val: 0.6224/0.6127 (T5:0.9908) | LR: 0.000271 | 4s | ETA 4m36s\n                                                                                      \r[Epoch 89 | 本轮 8/60] Train: 0.6225/0.6062 | Val: 0.6166/0.6160 (T5:0.9877) | LR: 0.000261 | 4s | ETA 4m31s\n                                                                                      \r[Epoch 90 | 本轮 9/60] Train: 0.6100/0.6140 | Val: 0.6025/0.6188 (T5:0.9886) | LR: 0.000250 | 4s | ETA 4m25s\n                                                                                      \r[Epoch 91 | 本轮 10/60] Train: 0.6099/0.6070 | Val: 0.6252/0.6191 (T5:0.9880) | LR: 0.000238 | 4s | ETA 4m19s\n                                                                                      \r[Epoch 92 | 本轮 11/60] Train: 0.6063/0.6091 | Val: 0.6017/0.6191 (T5:0.9897) | LR: 0.000225 | 4s | ETA 4m14s\n                                                                                      \r[Epoch 93 | 本轮 12/60] Train: 0.6098/0.6130 | Val: 0.6307/0.6116 (T5:0.9872) | LR: 0.000211 | 4s | ETA 4m08s\n                                                                                      \r[Epoch 94 | 本轮 13/60] Train: 0.5945/0.6150 | Val: 0.5991/0.6225 (T5:0.9905) | LR: 0.000196 | 4s | ETA 4m03s *\n                                                                                      \r[Epoch 95 | 本轮 14/60] Train: 0.5755/0.6216 | Val: 0.6146/0.6199 (T5:0.9905) | LR: 0.000181 | 4s | ETA 3m57s\n                                                                                      \r[Epoch 96 | 本轮 15/60] Train: 0.5760/0.6222 | Val: 0.5980/0.6213 (T5:0.9902) | LR: 0.000166 | 4s | ETA 3m52s\n                                                                                      \r[Epoch 97 | 本轮 16/60] Train: 0.5700/0.6267 | Val: 0.5883/0.6216 (T5:0.9911) | LR: 0.000150 | 4s | ETA 3m47s\n                                                                                      \r[Epoch 98 | 本轮 17/60] Train"
+        },
+        {
+          "cell": 11,
+          "execution_count": 6,
+          "text": "分类报告:\n              precision    recall  f1-score   support\n\n       Angry       0.58      0.61      0.60       491\n     Disgust       0.89      0.73      0.80        55\n        Fear       0.53      0.24      0.33       528\n       Happy       0.89      0.86      0.88       879\n         Sad       0.47      0.61      0.53       594\n    Surprise       0.72      0.83      0.77       416\n     Neutral       0.62      0.69      0.66       626\n\n    accuracy                           0.66      3589\n   macro avg       0.67      0.65      0.65      3589\nweighted avg       0.66      0.66      0.65      3589\n\n<Figure size 1000x800 with 2 Axes>"
+        }
+      ]
+    },
+    {
+      "path": "training\\notebooks\\04_train_resnet.ipynb",
+      "kernel": {
+        "display_name": "Python 3",
+        "language": "python",
+        "name": "python3"
+      },
+      "classification_outputs": [
+        {
+          "cell": 7,
+          "execution_count": 11,
+          "text": "\n============================================================\n模型: micro_resnet | 参数量: 753,991\n设备: cuda | AMP: True | Compile: False\n   matmul_precision: high\n权重已训练: 87 轮 | 本次续训: 90 轮 → 训练至第 177 轮\n之前累计用时: 9m13s\n============================================================\n\n                                                                          \r[Epoch 88 | 本轮 1/90] Train: 0.6283/0.0000 | Val: 0.5289/0.6640 (T5:0.9866) | LR: 0.000002 | 17s | ETA 9m44s *\n                                                                          \r[Epoch 89 | 本轮 2/90] Train: 0.6140/0.0000 | Val: 0.5287/0.6620 (T5:0.9872) | LR: 0.000001 | 4s | ETA 9m35s\n                                                                          \r[Epoch 90 | 本轮 3/90] Train: 0.5874/0.0000 | Val: 0.5311/0.6631 (T5:0.9869) | LR: 0.000000 | 4s | ETA 9m27s\n                                                                          \r[Epoch 91 | 本轮 4/90] Train: 0.6618/0.0000 | Val: 0.6371/0.6099 (T5:0.9797) | LR: 0.000300 | 4s | ETA 9m18s\n                                                                          \r[Epoch 92 | 本轮 5/90] Train: 0.6847/0.0000 | Val: 0.5911/0.6239 (T5:0.9844) | LR: 0.000300 | 4s | ETA 9m10s\n                                                                          \r[Epoch 93 | 本轮 6/90] Train: 0.6571/0.0000 | Val: 0.5793/0.6333 (T5:0.9872) | LR: 0.000300 | 4s | ETA 9m02s\n                                                                          \r[Epoch 94 | 本轮 7/90] Train: 0.7033/0.0000 | Val: 0.5888/0.6202 (T5:0.9850) | LR: 0.000300 | 4s | ETA 8m53s\n                                                                          \r[Epoch 95 | 本轮 8/90] Train: 0.6747/0.0000 | Val: 0.5677/0.6381 (T5:0.9875) | LR: 0.000299 | 4s | ETA 8m45s\n                                                                          \r[Epoch 96 | 本轮 9/90] Train: 0.6881/0.0000 | Val: 0.5790/0.6389 (T5:0.9869) | LR: 0.000299 | 4s | ETA 8m37s\n                                                                          \r[Epoch 97 | 本轮 10/90] Train: 0.6683/0.0000 | Val: 0.5955/0.6250 (T5:0.9847) | LR: 0.000298 | 4s | ETA 8m30s\n                                                                          \r[Epoch 98 | 本轮 11/90] Train: 0.6505/0.0000 | Val: 0.5830/0.6244 (T5:0.9869) | LR: 0.000297 | 6s | ETA 8m23s\n                                                                          \r[Epoch 99 | 本轮 12/90] Train: 0.6512/0.0000 | Val: 0.5833/0.6369 (T5:0.9880) | LR: 0.000297 | 6s | ETA 8m16s\n                                                                           \r[Epoch 100 | 本轮 13/90] Train: 0.6383/0.0000 | Val: 0.5783/0.6333 (T5:0.9869) | LR: 0.000296 | 6s | ETA 8m10s\n                                                                           \r[Epoch 101 | 本轮 14/90] Train: 0.6937/0.0000 | Val: 0.5698/0.6358 (T5:0.9861) | LR: 0.000295 | 6s | ETA 8m03s\n                                                                           \r[Epoch 102 | 本轮 15/90] Train: 0.6634/0.0000 | Val: 0.5618/0.6386 (T5:0.9844) | LR: 0.000294 | 6s | ETA 7m57s\n                                                                           \r[Epoch 103 | 本轮 16/90] Train: 0.6713/0.0000 | Val: 0.5671/0.6367 (T5:0.9844) | LR: 0.000293 | 6s | ETA 7m50s\n                                                                           \r[Epoch 104 | 本轮 17/90] Train: 0.6502/0.0000 | Val: 0.5654/0.6328 (T5:0.9850) | LR: 0.000291 | 6s | ETA 7m44s\n                                                                           \r[Epoch 105 | 本轮 18/90] Train: 0.6794/"
+        },
+        {
+          "cell": 11,
+          "execution_count": 7,
+          "text": "分类报告:\n              precision    recall  f1-score   support\n\n       Angry       0.59      0.65      0.62       491\n     Disgust       0.80      0.67      0.73        55\n        Fear       0.53      0.40      0.45       528\n       Happy       0.88      0.86      0.87       879\n         Sad       0.55      0.51      0.53       594\n    Surprise       0.70      0.86      0.77       416\n     Neutral       0.62      0.70      0.66       626\n\n    accuracy                           0.67      3589\n   macro avg       0.67      0.66      0.66      3589\nweighted avg       0.67      0.67      0.67      3589\n\n<Figure size 1000x800 with 2 Axes>"
+        }
+      ]
+    },
+    {
+      "path": "analysis\\comparison_report.ipynb",
+      "kernel": {
+        "display_name": "Python 3",
+        "language": "python",
+        "name": "python3"
+      },
+      "classification_outputs": []
+    }
+  ],
+  "presentation_materials": [
+    {
+      "path": "report&ppt\\人脸情绪识别系统课程报告.docx",
+      "reviewed_text": true
+    },
+    {
+      "path": "report&ppt\\人脸情绪识别系统课程报告.pptx",
+      "reviewed_text": true
+    }
+  ],
+  "source_control_before_review": {
+    "commit": "03aec2a",
+    "existing_deleted_file": ".github/workflows/ci.yml"
+  },
+  "windows_environment": {
+    "executable": "D:\\Document\\Unniversity\\emotion_recognition\\.venv\\Scripts\\python.exe",
+    "python_version": "3.10.11",
+    "default_platform": "Windows"
+  },
+  "proposed_gap_head": {
+    "parameters": 127943,
+    "implemented_in_project": false,
+    "trained": false
+  },
+  "audit_scope": {
+    "application_code_modified": false,
+    "training_rerun": false,
+    "advisor": "Kai Zhao",
+    "complete_pixel_rows_checked": 35887,
+    "temporary_scripts_location": "System temporary directory; removed after completion"
+  },
+  "runtime_environment": {
+    "python": "3.10.11 (tags/v3.10.11:7d4cc5a, Apr  5 2023, 00:38:17) [MSC v.1929 64 bit (AMD64)]",
+    "executable": "D:\\Document\\Unniversity\\emotion_recognition\\.venv\\Scripts\\python.exe",
+    "torch": "2.14.1+cpu",
+    "numpy": "2.2.6",
+    "cuda_available": false,
+    "torch_threads": 4
+  },
+  "editable_install": {
+    "passed": false,
+    "error": "Cannot import 'setuptools.backends._legacy'",
+    "command": ".venv/Scripts/python.exe -m pip install --no-build-isolation --no-deps -e ."
+  },
+  "models": [
+    {
+      "name": "mini_cnn",
+      "parameters": 1274823,
+      "checkpoint_path": "inference\\saved_models\\mini_cnn_best.pth",
+      "checkpoint_sha256": "e6a3b3a6ec0be32f1ae2ad9a5f5e27408da33d613bc6198d21f08cf3ebbf26fb",
+      "matches_global_best_file": true,
+      "checkpoint_epoch": 107,
+      "checkpoint_val_acc": 0.6124268770217896,
+      "checkpoint_global_best_val_acc": 0.6124268770217896,
+      "checkpoint_config": {
+        "learning_rate": 0.0005,
+        "batch_size": 256,
+        "num_epochs": 30,
+        "dropout": 0.3,
+        "activation": "relu"
+      },
+      "checkpoint_keys": [
+        "epoch",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "val_acc",
+        "val_loss",
+        "best_val_acc",
+        "global_best_val_acc",
+        "history",
+        "config",
+        "model_name",
+        "timestamp",
+        "training_duration_seconds"
+      ],
+      "tracked_history_epochs": 60,
+      "tracked_history_best_val_acc": 0.5784341096878052,
+      "ctor_kwargs": {
+        "dropout": 0.3,
+        "activation": "relu",
+        "num_classes": 7
+      },
+      "public_test": {
+        "n": 3589,
+        "accuracy": 0.6113123432711062,
+        "macro_f1": 0.5614049427738081,
+        "balanced_accuracy": 0.5559587212694536,
+        "per_class": {
+          "0": {
+            "precision": 0.4919210053859964,
+            "recall": 0.5867237687366167,
+            "f1-score": 0.53515625,
+            "support": 467.0
+          },
+          "1": {
+            "precision": 0.7142857142857143,
+            "recall": 0.26785714285714285,
+            "f1-score": 0.38961038961038963,
+            "support": 56.0
+          },
+          "2": {
+            "precision": 0.44476744186046513,
+            "recall": 0.3084677419354839,
+            "f1-score": 0.36428571428571427,
+            "support": 496.0
+          },
+          "3": {
+            "precision": 0.8633093525179856,
+            "recall": 0.8044692737430168,
+            "f1-score": 0.8328513591671486,
+            "support": 895.0
+          },
+          "4": {
+            "precision": 0.49137931034482757,
+            "recall": 0.5237366003062787,
+            "f1-score": 0.5070422535211268,
+            "support": 653.0
+          },
+          "5": {
+            "precision": 0.6603053435114504,
+            "recall": 0.8337349397590361,
+            "f1-score": 0.7369542066027689,
+            "support": 415.0
+          },
+          "6": {
+            "precision": 0.5611745513866232,
+            "recall": 0.5667215815485996,
+            "f1-score": 0.5639344262295082,
+            "support": 607.0
+          },
+          "accuracy": 0.6113123432711062,
+          "macro avg": {
+            "precision": 0.6038775313275803,
+            "recall": 0.5559587212694536,
+            "f1-score": 0.5614049427738081,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.612572859037546,
+            "recall": 0.6113123432711062,
+            "f1-score": 0.6065942087821817,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.09952705293918725,
+        "n_without_identical_training_pixels": 3309,
+        "accuracy_without_identical_training_pixels": 0.5995769114536114,
+        "macro_f1_without_identical_training_pixels": 0.5352475867596799,
+        "elapsed_seconds": 1.538425200000347
+      },
+      "private_test": {
+        "n": 3589,
+        "accuracy": 0.6241292839230984,
+        "macro_f1": 0.5757884408769912,
+        "balanced_accuracy": 0.5667466910089288,
+        "per_class": {
+          "0": {
+            "precision": 0.5108695652173914,
+            "recall": 0.5743380855397149,
+            "f1-score": 0.5407478427612655,
+            "support": 491.0
+          },
+          "1": {
+            "precision": 0.8333333333333334,
+            "recall": 0.2727272727272727,
+            "f1-score": 0.410958904109589,
+            "support": 55.0
+          },
+          "2": {
+            "precision": 0.44591029023746703,
+            "recall": 0.32007575757575757,
+            "f1-score": 0.37265711135611906,
+            "support": 528.0
+          },
+          "3": {
+            "precision": 0.8696682464454977,
+            "recall": 0.8350398179749715,
+            "f1-score": 0.8520023215322112,
+            "support": 879.0
+          },
+          "4": {
+            "precision": 0.47655068078668683,
+            "recall": 0.5303030303030303,
+            "f1-score": 0.50199203187251,
+            "support": 594.0
+          },
+          "5": {
+            "precision": 0.6751968503937008,
+            "recall": 0.8245192307692307,
+            "f1-score": 0.7424242424242424,
+            "support": 416.0
+          },
+          "6": {
+            "precision": 0.6092503987240829,
+            "recall": 0.610223642172524,
+            "f1-score": 0.6097366320830008,
+            "support": 626.0
+          },
+          "accuracy": 0.6241292839230984,
+          "macro avg": {
+            "precision": 0.6315399093054513,
+            "recall": 0.5667466910089288,
+            "f1-score": 0.5757884408769912,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.6246567443517401,
+            "recall": 0.6241292839230984,
+            "f1-score": 0.6192560070797904,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.11227021058079391,
+        "n_without_identical_training_pixels": 3301,
+        "accuracy_without_identical_training_pixels": 0.6104210845198424,
+        "macro_f1_without_identical_training_pixels": 0.5394550399091805,
+        "elapsed_seconds": 1.568605700000262
+      },
+      "gradcam": {
+        "passed": true,
+        "shape": [
+          48,
+          48
+        ],
+        "min": 0.0,
+        "max": 0.8235294222831726
+      },
+      "application_sample_max_logit_difference": 0.0
+    },
+    {
+      "name": "vgg_lite",
+      "parameters": 5407687,
+      "checkpoint_path": "inference\\saved_models\\vgg_lite_best.pth",
+      "checkpoint_sha256": "0130d79c440a1914ad56734421c5a697ce7fbc62026e68535f06af78b845eaa7",
+      "matches_global_best_file": true,
+      "checkpoint_epoch": 109,
+      "checkpoint_val_acc": 0.6500418186187744,
+      "checkpoint_global_best_val_acc": 0.6500418186187744,
+      "checkpoint_config": {
+        "learning_rate": 0.0003,
+        "batch_size": 128,
+        "num_epochs": 30,
+        "dropout": 0.5,
+        "activation": "relu"
+      },
+      "checkpoint_keys": [
+        "epoch",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "val_acc",
+        "val_loss",
+        "best_val_acc",
+        "global_best_val_acc",
+        "history",
+        "config",
+        "model_name",
+        "timestamp",
+        "training_duration_seconds"
+      ],
+      "tracked_history_epochs": 130,
+      "tracked_history_best_val_acc": 0.6366676092147827,
+      "ctor_kwargs": {
+        "dropout": 0.5,
+        "activation": "relu",
+        "num_classes": 7
+      },
+      "public_test": {
+        "n": 3589,
+        "accuracy": 0.6503204235162998,
+        "macro_f1": 0.6292579975010916,
+        "balanced_accuracy": 0.6302755489157578,
+        "per_class": {
+          "0": {
+            "precision": 0.5438282647584973,
+            "recall": 0.6509635974304069,
+            "f1-score": 0.5925925925925926,
+            "support": 467.0
+          },
+          "1": {
+            "precision": 0.75,
+            "recall": 0.5892857142857143,
+            "f1-score": 0.66,
+            "support": 56.0
+          },
+          "2": {
+            "precision": 0.5145985401459854,
+            "recall": 0.2842741935483871,
+            "f1-score": 0.36623376623376624,
+            "support": 496.0
+          },
+          "3": {
+            "precision": 0.8820754716981132,
+            "recall": 0.8357541899441341,
+            "f1-score": 0.8582903040734366,
+            "support": 895.0
+          },
+          "4": {
+            "precision": 0.5178826895565093,
+            "recall": 0.554364471669219,
+            "f1-score": 0.5355029585798816,
+            "support": 653.0
+          },
+          "5": {
+            "precision": 0.7169042769857433,
+            "recall": 0.8481927710843373,
+            "f1-score": 0.7770419426048565,
+            "support": 415.0
+          },
+          "6": {
+            "precision": 0.5845697329376854,
+            "recall": 0.6490939044481054,
+            "f1-score": 0.615144418423107,
+            "support": 607.0
+          },
+          "accuracy": 0.6503204235162998,
+          "macro avg": {
+            "precision": 0.6442655680117906,
+            "recall": 0.6302755489157578,
+            "f1-score": 0.6292579975010916,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.6495382340058783,
+            "recall": 0.6503204235162998,
+            "f1-score": 0.6433744806505763,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.2086489703386864,
+        "n_without_identical_training_pixels": 3309,
+        "accuracy_without_identical_training_pixels": 0.6343306134783923,
+        "macro_f1_without_identical_training_pixels": 0.5967607462690859,
+        "elapsed_seconds": 8.997175399999833
+      },
+      "private_test": {
+        "n": 3589,
+        "accuracy": 0.6550571189746448,
+        "macro_f1": 0.6365348140073808,
+        "balanced_accuracy": 0.6395863131907175,
+        "per_class": {
+          "0": {
+            "precision": 0.5669565217391305,
+            "recall": 0.6639511201629328,
+            "f1-score": 0.6116322701688556,
+            "support": 491.0
+          },
+          "1": {
+            "precision": 0.813953488372093,
+            "recall": 0.6363636363636364,
+            "f1-score": 0.7142857142857143,
+            "support": 55.0
+          },
+          "2": {
+            "precision": 0.5040650406504065,
+            "recall": 0.23484848484848486,
+            "f1-score": 0.32041343669250644,
+            "support": 528.0
+          },
+          "3": {
+            "precision": 0.8896713615023474,
+            "recall": 0.8623435722411832,
+            "f1-score": 0.8757943385326401,
+            "support": 879.0
+          },
+          "4": {
+            "precision": 0.4869942196531792,
+            "recall": 0.5673400673400674,
+            "f1-score": 0.5241057542768274,
+            "support": 594.0
+          },
+          "5": {
+            "precision": 0.7058823529411765,
+            "recall": 0.8365384615384616,
+            "f1-score": 0.7656765676567657,
+            "support": 416.0
+          },
+          "6": {
+            "precision": 0.6148255813953488,
+            "recall": 0.6757188498402555,
+            "f1-score": 0.6438356164383562,
+            "support": 626.0
+          },
+          "accuracy": 0.6550571189746448,
+          "macro avg": {
+            "precision": 0.654621223750526,
+            "recall": 0.6395863131907175,
+            "f1-score": 0.6365348140073808,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.6517450547532356,
+            "recall": 0.6550571189746448,
+            "f1-score": 0.6440457072049365,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.21435630940965839,
+        "n_without_identical_training_pixels": 3301,
+        "accuracy_without_identical_training_pixels": 0.6395031808542866,
+        "macro_f1_without_identical_training_pixels": 0.6029818242288487,
+        "elapsed_seconds": 8.983027900000707
+      },
+      "gradcam": {
+        "passed": true,
+        "shape": [
+          48,
+          48
+        ],
+        "min": 0.0,
+        "max": 0.843137264251709
+      },
+      "application_sample_max_logit_difference": 0.0
+    },
+    {
+      "name": "micro_resnet",
+      "parameters": 753991,
+      "checkpoint_path": "inference\\saved_models\\micro_resnet_best.pth",
+      "checkpoint_sha256": "8a6d9395d5e92ebecec98260ceffeff0c52a41c59ec2af802c552338fb655698",
+      "matches_global_best_file": true,
+      "checkpoint_epoch": 89,
+      "checkpoint_val_acc": 0.6731680631637573,
+      "checkpoint_global_best_val_acc": 0.6731680631637573,
+      "checkpoint_config": {
+        "learning_rate": 0.001,
+        "batch_size": 512,
+        "num_epochs": 50,
+        "dropout": 0.3,
+        "activation": "gelu"
+      },
+      "checkpoint_keys": [
+        "epoch",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "val_acc",
+        "val_loss",
+        "best_val_acc",
+        "global_best_val_acc",
+        "history",
+        "config",
+        "model_name",
+        "timestamp",
+        "training_duration_seconds"
+      ],
+      "tracked_history_epochs": 108,
+      "tracked_history_best_val_acc": 0.6639732718467712,
+      "ctor_kwargs": {
+        "dropout": 0.3,
+        "activation": "gelu",
+        "num_classes": 7
+      },
+      "public_test": {
+        "n": 3589,
+        "accuracy": 0.6728893842295904,
+        "macro_f1": 0.6416889365981044,
+        "balanced_accuracy": 0.6428798646401324,
+        "per_class": {
+          "0": {
+            "precision": 0.6044444444444445,
+            "recall": 0.582441113490364,
+            "f1-score": 0.5932388222464559,
+            "support": 467.0
+          },
+          "1": {
+            "precision": 0.62,
+            "recall": 0.5535714285714286,
+            "f1-score": 0.5849056603773585,
+            "support": 56.0
+          },
+          "2": {
+            "precision": 0.5685131195335277,
+            "recall": 0.39314516129032256,
+            "f1-score": 0.464839094159714,
+            "support": 496.0
+          },
+          "3": {
+            "precision": 0.8459869848156182,
+            "recall": 0.8715083798882681,
+            "f1-score": 0.8585580627407815,
+            "support": 895.0
+          },
+          "4": {
+            "precision": 0.5696594427244582,
+            "recall": 0.5635528330781011,
+            "f1-score": 0.5665896843725943,
+            "support": 653.0
+          },
+          "5": {
+            "precision": 0.7248459958932238,
+            "recall": 0.8506024096385543,
+            "f1-score": 0.7827050997782705,
+            "support": 415.0
+          },
+          "6": {
+            "precision": 0.6020260492040521,
+            "recall": 0.685337726523888,
+            "f1-score": 0.6409861325115562,
+            "support": 607.0
+          },
+          "accuracy": 0.6728893842295904,
+          "macro avg": {
+            "precision": 0.6479251480879035,
+            "recall": 0.6428798646401324,
+            "f1-score": 0.6416889365981044,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.6671398524702653,
+            "recall": 0.6728893842295904,
+            "f1-score": 0.6666623478863878,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.06070515606422615,
+        "n_without_identical_training_pixels": 3309,
+        "accuracy_without_identical_training_pixels": 0.6576004835297673,
+        "macro_f1_without_identical_training_pixels": 0.6084891036327076,
+        "elapsed_seconds": 2.6959400999994614
+      },
+      "private_test": {
+        "n": 3589,
+        "accuracy": 0.6681526887712455,
+        "macro_f1": 0.6372968089177041,
+        "balanced_accuracy": 0.6397187187205802,
+        "per_class": {
+          "0": {
+            "precision": 0.6329113924050633,
+            "recall": 0.6109979633401222,
+            "f1-score": 0.6217616580310881,
+            "support": 491.0
+          },
+          "1": {
+            "precision": 0.6078431372549019,
+            "recall": 0.5636363636363636,
+            "f1-score": 0.5849056603773585,
+            "support": 55.0
+          },
+          "2": {
+            "precision": 0.5216216216216216,
+            "recall": 0.36553030303030304,
+            "f1-score": 0.4298440979955457,
+            "support": 528.0
+          },
+          "3": {
+            "precision": 0.8617614269788183,
+            "recall": 0.8794084186575654,
+            "f1-score": 0.8704954954954955,
+            "support": 879.0
+          },
+          "4": {
+            "precision": 0.5232558139534884,
+            "recall": 0.5303030303030303,
+            "f1-score": 0.5267558528428093,
+            "support": 594.0
+          },
+          "5": {
+            "precision": 0.7237687366167024,
+            "recall": 0.8125,
+            "f1-score": 0.7655719139297849,
+            "support": 416.0
+          },
+          "6": {
+            "precision": 0.6153846153846154,
+            "recall": 0.7156549520766773,
+            "f1-score": 0.6617429837518464,
+            "support": 626.0
+          },
+          "accuracy": 0.6681526887712455,
+          "macro avg": {
+            "precision": 0.6409352491736016,
+            "recall": 0.6397187187205802,
+            "f1-score": 0.6372968089177041,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.6615290871836704,
+            "recall": 0.6681526887712455,
+            "f1-score": 0.6617999471463589,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.06446843479097503,
+        "n_without_identical_training_pixels": 3301,
+        "accuracy_without_identical_training_pixels": 0.6507119054831869,
+        "macro_f1_without_identical_training_pixels": 0.6042017114102615,
+        "elapsed_seconds": 2.677270099999987
+      },
+      "gradcam": {
+        "passed": true,
+        "shape": [
+          48,
+          48
+        ],
+        "min": 0.0,
+        "max": 0.9921568632125854
+      },
+      "application_private_test": {
+        "n": 3589,
+        "accuracy": 0.6235720256338813,
+        "macro_f1": 0.5538410075542611,
+        "balanced_accuracy": 0.5382966267778334,
+        "per_class": {
+          "0": {
+            "precision": 0.6380208333333334,
+            "recall": 0.4989816700610998,
+            "f1-score": 0.56,
+            "support": 491.0
+          },
+          "1": {
+            "precision": 0.75,
+            "recall": 0.10909090909090909,
+            "f1-score": 0.19047619047619047,
+            "support": 55.0
+          },
+          "2": {
+            "precision": 0.36681715575620766,
+            "recall": 0.615530303030303,
+            "f1-score": 0.4596888260254597,
+            "support": 528.0
+          },
+          "3": {
+            "precision": 0.8449612403100775,
+            "recall": 0.8680318543799772,
+            "f1-score": 0.856341189674523,
+            "support": 879.0
+          },
+          "4": {
+            "precision": 0.5315904139433552,
+            "recall": 0.4107744107744108,
+            "f1-score": 0.4634377967711301,
+            "support": 594.0
+          },
+          "5": {
+            "precision": 0.8369230769230769,
+            "recall": 0.6538461538461539,
+            "f1-score": 0.7341430499325237,
+            "support": 416.0
+          },
+          "6": {
+            "precision": 0.6137820512820513,
+            "recall": 0.6118210862619808,
+            "f1-score": 0.6128,
+            "support": 626.0
+          },
+          "accuracy": 0.6235720256338813,
+          "macro avg": {
+            "precision": 0.6545849673640145,
+            "recall": 0.5382966267778334,
+            "f1-score": 0.5538410075542611,
+            "support": 3589.0
+          },
+          "weighted avg": {
+            "precision": 0.6517333205972191,
+            "recall": 0.6235720256338813,
+            "f1-score": 0.6255709546936528,
+            "support": 3589.0
+          }
+        },
+        "ece_15_equal_width_bins": 0.30521443149079586,
+        "n_without_identical_training_pixels": 3301,
+        "accuracy_without_identical_training_pixels": 0.6116328385337776,
+        "macro_f1_without_identical_training_pixels": 0.5390730202918985,
+        "elapsed_seconds": 2.6514108000001215
+      },
+      "application_prediction_disagreement_count": 836,
+      "application_max_probability_difference": 0.725021243095398
+    }
+  ],
+  "existing_tests": {
+    "exit_code": 0,
+    "output": "....................................                                     [100%]\n36 passed in 1.93s\n"
+  },
+  "resume_probe": {
+    "best_val_acc_after_restore": 0.0,
+    "global_best_val_acc_after_restore": 0.7,
+    "global_best_model_state_is_none": true,
+    "start_epoch": 4
+  },
+  "val_loss_stop_probe": {
+    "increasing_nonnegative_losses": [
+      0.5,
+      0.6,
+      0.7
+    ],
+    "threshold": 1.05,
+    "actual_condition": false,
+    "mathematical_reason": "min(window) <= window[0], so condition cannot hold for nonnegative losses and threshold >= 1"
+  },
+  "tool_checks": {
+    "cli_help": {
+      "exit_code": 0,
+      "stdout": "usage: train.py [-h] [--model {mini_cnn,vgg_lite,micro_resnet}]\n                [--epochs EPOCHS] [--amp] [--no-amp] [--resume [RESUME]]\n                [--diagnose] [--steps STEPS] [--seed SEED] [--lr LR]\n                [--batch-size BATCH_SIZE]\n\nFER2013 情感识别模型训练\n\noptions:\n  -h, --help            show this help message and exit\n  --model {mini_cnn,vgg_lite,micro_resnet}\n                        模型名称 (默认: micro_resnet)\n  --epochs EPOCHS       本次训练轮数 (默认: 30)\n  --amp                 启用 AMP 混合精度训练（覆盖 config 中的 amp 设置）\n  --no-amp              禁用 AMP（覆盖 config 中的 amp 设置）\n  --resume [RESUME]     恢复训练。可指定 checkpoint 路径，或 'auto' 自动选择最佳\n                        checkpoint。不指定则从头训练。\n  --diagnose            仅运行性能诊断（不训练）\n  --steps STEPS         诊断步数 (默认: 10，含 3 步预热)\n  --seed SEED           随机种子（覆盖 config 中的 seed）\n  --lr LR               学习率覆盖\n  --batch-size BATCH_SIZE\n                        Batch size 覆盖\n\n示例:\n  python training/train.py --model micro_resnet --epochs 30\n  python training/train.py --model mini_cnn --epochs 20 --amp\n  python training/train.py --model vgg_lite --epochs 10 --resume auto\n",
+      "stderr": ""
+    },
+    "ruff": {
+      "exit_code": 1,
+      "count": 142,
+      "by_rule": {
+        "I001": 31,
+        "N806": 6,
+        "E501": 27,
+        "N803": 1,
+        "E402": 30,
+        "F401": 12,
+        "N812": 2,
+        "SIM108": 1,
+        "F541": 12,
+        "F841": 3,
+        "UP015": 2,
+        "B007": 1,
+        "W293": 3,
+        "E702": 11
+      },
+      "undefined_names": [],
+      "configuration_warnings": "warning: The top-level linter settings are deprecated in favour of their counterparts in the `lint` section. Please update the following options in `pyproject.toml`:\n  - 'select' -> 'lint.select'\n  - 'per-file-ignores' -> 'lint.per-file-ignores'\n"
+    },
+    "mypy": {
+      "exit_code": 2,
+      "stdout": "training\\trainer.py: error: Source file found twice under different module names: \"trainer\" and \"training.trainer\"\ntraining\\trainer.py: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#mapping-file-paths-to-modules for more info\ntraining\\trainer.py: note: Common resolutions include:\ntraining\\trainer.py: note:     a) adding `__init__.py` somewhere,\ntraining\\trainer.py: note:     b) using `--explicit-package-bases` or adjusting `MYPYPATH`\nFound 1 error in 1 file (errors prevented further checking)\n",
+      "stderr": "pyproject.toml: [mypy]: python_version: Python 3.9 is not supported (must be 3.10 or higher)\n"
+    },
+    "streamlit_startup": {
+      "passed": true,
+      "exceptions": [],
+      "upload_flow_tested": false
+    },
+    "pip_check": {
+      "exit_code": 0,
+      "stdout": "No broken requirements found.\n",
+      "stderr": ""
+    }
+  },
+  "source_artifacts_verified_unchanged": true,
+  "checks_summary": {
+    "existing_tests_passed": 36,
+    "pip_check_passed": true,
+    "streamlit_startup_passed": true,
+    "training_cli_help_passed": true,
+    "ruff_findings": 142,
+    "mypy_completed": false
+  },
+  "source_control_after_review": {
+    "deleted_files_observed": [
+      ".github/workflows/ci.yml",
+      "emotion_recognition.code-workspace"
+    ],
+    "audit_did_not_remove_these_files": true
+  },
+  "environment_lock_file": "requirements-review-lock.txt",
+  "temporary_audit_scripts_removed": true
+}
