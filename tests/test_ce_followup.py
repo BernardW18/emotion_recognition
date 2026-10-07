@@ -14,6 +14,7 @@ from torch.utils.data import WeightedRandomSampler
 import tests.test_fourth_fixes as fixtures
 import tools.freeze_comparison as freeze
 import tools.summarize_ablation as ablation
+import training.train as train_cli
 import utils.comparison_check as comparison
 import utils.formal_protocol as formal
 from tests.test_fourth_fixes import _formal_fixture
@@ -330,3 +331,34 @@ def test_ablation_cli_saves_only_public_predictions_and_rejects_wrong_data(
     with pytest.raises(ValueError, match="评估数据"):
         ablation.main()
     assert not failed_out.exists()
+
+
+@pytest.mark.parametrize("explicit_protocol", [False, True])
+def test_training_cli_writes_json_metadata_with_protocol_path(
+    tmp_path, monkeypatch, explicit_protocol,
+):
+    cfg, path, _, _ = _formal_fixture(tmp_path, monkeypatch)
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    original = train_cli.Trainer
+    output = tmp_path / "cli-run"
+
+    def isolated_trainer(*args, **kwargs):
+        kwargs["run_dir"] = output
+        kwargs["device"] = torch.device("cpu")
+        trainer = original(*args, **kwargs)
+        monkeypatch.setattr(trainer, "fit", lambda epochs: {})
+        return trainer
+
+    monkeypatch.setattr(train_cli, "Trainer", isolated_trainer)
+    arguments = ["train", "--model", "mini_cnn", "--config", str(config_file),
+                 "--purpose", "smoke", "--epochs", "1"]
+    if explicit_protocol:
+        arguments.extend(["--protocol", str(path)])
+    monkeypatch.setattr(sys, "argv", arguments)
+    train_cli.main()
+    meta = json.loads((output / "run_meta.json").read_text(encoding="utf-8"))
+    expected = str(path if explicit_protocol else train_cli.FROZEN_PROTOCOL_PATH)
+    assert meta["cli_args"]["protocol"] == expected
+    assert meta["cli_args"]["seed"] is None
+    assert meta["cli_args"]["epochs"] == 1

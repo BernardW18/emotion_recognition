@@ -98,6 +98,9 @@ def parse_args():
 def main():
     ensure_utf8_stdio()
     args = parse_args()
+    # argparse's protocol Path is for file access; metadata must contain JSON values.
+    cli_args = {key: str(value) if isinstance(value, Path) else value
+                for key, value in vars(args).items()}
     model_name = args.model
 
     config = load_config(args.config)
@@ -186,7 +189,7 @@ def main():
             device=device,
             class_counts=train_loader.dataset.class_counts,
             run_dir=diagnose_dir / "diagnose",
-            run_meta_extra={"cli_args": vars(args), "purpose": "diagnose"},
+            run_meta_extra={"cli_args": cli_args, "purpose": "diagnose"},
             run_purpose="diagnose",
         )
         diag_trainer.diagnose(num_steps=max(args.steps - 3, 5))
@@ -203,7 +206,7 @@ def main():
         device=device,
         class_counts=train_loader.dataset.class_counts,
         run_dir=run_dir,
-        run_meta_extra={"cli_args": vars(args)},
+        run_meta_extra={"cli_args": cli_args},
         run_purpose=args.purpose,
         frozen_protocol=frozen_protocol,
     )
