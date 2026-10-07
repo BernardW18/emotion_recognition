@@ -25,7 +25,7 @@
 
 # Frozen protocols are bound by their exact file SHA-256 in checkpoints.
 # Preserve their existing bytes across Git add/checkout, including line endings.
-configs/protocols/*.json -text
+configs/protocols/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 
 # Ignore files
 .gitignore text

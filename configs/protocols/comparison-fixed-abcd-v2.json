@@ -1,0 +1,2253 @@
+{
+  "schema_version": 1,
+  "protocol_id": "comparison-fixed-abcd-v2",
+  "frozen_at": "2026-10-07",
+  "git_commit": "e7d1c5ff0732d2112ed129d19c51c563f8884556",
+  "code_sha256": "ac21e4f422e7e8e05f21df30a4f320c7737488e9f1225c8076895ffc51b1a6f8",
+  "plans": [
+    {
+      "model_name": "mini_cnn",
+      "arm": "A",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": false
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "cross_entropy",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "RandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "cross_entropy",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "mini_cnn",
+      "arm": "B",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": false
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "RandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "mini_cnn",
+      "arm": "C",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": true
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "WeightedRandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "mini_cnn",
+      "arm": "D",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "mini_cnn",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": true
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "cb_focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "WeightedRandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "cb_focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": 0.999,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "vgg_lite",
+      "arm": "A",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "vgg_lite",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.5,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": false
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "cross_entropy",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "RandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "cross_entropy",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "vgg_lite",
+      "arm": "B",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "vgg_lite",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.5,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": false
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "RandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "vgg_lite",
+      "arm": "C",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "vgg_lite",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.5,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": true
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "WeightedRandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "vgg_lite",
+      "arm": "D",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "vgg_lite",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "relu",
+        "dropout": 0.5,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": true
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "cb_focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "WeightedRandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "cb_focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": 0.999,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "micro_resnet",
+      "arm": "A",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": false
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "cross_entropy",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "RandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "cross_entropy",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "micro_resnet",
+      "arm": "B",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": false
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "RandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "micro_resnet",
+      "arm": "C",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": true
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "WeightedRandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": null,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    },
+    {
+      "model_name": "micro_resnet",
+      "arm": "D",
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "model_spec": {
+        "spec_version": 1,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": []
+      },
+      "training_protocol": {
+        "protocol_version": 2,
+        "config": {
+          "data": {
+            "dataset_path": "data/fer2013.csv",
+            "image_size": 48,
+            "num_classes": 7,
+            "class_names": [
+              "Angry",
+              "Disgust",
+              "Fear",
+              "Happy",
+              "Sad",
+              "Surprise",
+              "Neutral"
+            ]
+          },
+          "dataloader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "class_balanced_sampling": true
+          },
+          "augmentation": {
+            "enabled": true,
+            "impl": "batched",
+            "random_horizontal_flip": 0.5,
+            "random_rotation": 10,
+            "random_affine_translate": 0.1,
+            "color_jitter_brightness": 0.2,
+            "color_jitter_contrast": 0.2,
+            "random_erase": true,
+            "class_specific": {
+              "enabled": false,
+              "target_classes": [
+                1
+              ],
+              "augment_prob": 0.8,
+              "extra_rotation": 20,
+              "extra_translate": 0.15,
+              "extra_erase_prob": 0.2
+            },
+            "mixup": {
+              "enabled": false,
+              "alpha": 0.2
+            }
+          },
+          "training": {
+            "batch_size": 128,
+            "num_epochs": 50,
+            "learning_rate": 0.001,
+            "weight_decay": 0.0001,
+            "optimizer": "adam",
+            "optimizer_fused": false,
+            "activation": "relu",
+            "scheduler": "cosine_warm",
+            "scheduler_step_size": 10,
+            "scheduler_gamma": 0.5,
+            "scheduler_t0": 30,
+            "patience": 0,
+            "val_loss_patience": 0,
+            "val_loss_threshold": 1.05,
+            "loss_type": "cb_focal",
+            "cb_focal_beta": 0.999,
+            "amp": true,
+            "torch_compile": false,
+            "torch_compile_mode": "reduce-overhead",
+            "gradient_accumulation_steps": 1,
+            "max_grad_norm": 1.0,
+            "cudnn_deterministic": false
+          },
+          "models": {
+            "mini_cnn": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "relu"
+            },
+            "vgg_lite": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.5,
+              "activation": "relu"
+            },
+            "micro_resnet": {
+              "learning_rate": 0.0003,
+              "batch_size": 128,
+              "num_epochs": 90,
+              "dropout": 0.3,
+              "activation": "gelu",
+              "use_se": false
+            }
+          },
+          "checkpoint": {
+            "save_best": true,
+            "monitor_metric": "val_acc"
+          },
+          "seed": 42
+        },
+        "runtime": {
+          "loader": {
+            "num_workers": 0,
+            "persistent_workers": false,
+            "sampler": "WeightedRandomSampler",
+            "batch_size": 128,
+            "has_generators": true
+          },
+          "amp_effective": true,
+          "torch_compile_effective": false,
+          "loss_effective": "cb_focal",
+          "focal_gamma": 2.0,
+          "cb_focal_beta_effective": 0.999,
+          "scheduler_effective": {
+            "name": "CosineAnnealingWarmRestarts",
+            "T_0": 30,
+            "T_mult": 2
+          },
+          "max_grad_norm": 1.0,
+          "gradient_accumulation_steps": 1,
+          "patience": 0,
+          "val_loss_patience": 0,
+          "val_loss_threshold": 1.05,
+          "monitor_metric": "val_acc",
+          "save_best": true,
+          "cudnn_deterministic": false,
+          "batch_augmentation_effective": {
+            "impl": "batched",
+            "active": true,
+            "version": "batched-v1",
+            "seed_rule": "sha256(train_seed|epoch|batch_idx)"
+          },
+          "optimizer_fused_effective": false
+        },
+        "data_fingerprint": {
+          "protocol": "official-usage",
+          "csv_path": "D:\\Document\\Unniversity\\emotion_recognition\\data\\fer2013.csv",
+          "csv_sha256": "3b8d9617d1017f34733c8f2474d7784c563ce86c40a86ac12c2d37cc968f871b",
+          "splits": {
+            "Training": {
+              "rows": 28709,
+              "row_label_hash_sha256": "fbc63c66a26f84fe97e94e79656c71deff6ac083bc2e7356bae99ef989cf76ba"
+            },
+            "PublicTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "e33fbc56562710c401ff1bd4f032baf7573ce0ea9119548cad861f48c147d47a"
+            },
+            "PrivateTest": {
+              "rows": 3589,
+              "row_label_hash_sha256": "088c054fb6a4d3a2763ca28489ccbb4f40ccfafc7f8e18897af5a1bb23897fc6"
+            }
+          }
+        }
+      },
+      "max_epochs": 90,
+      "allow_early_stop": false,
+      "lr_floor": 1e-07
+    }
+  ]
+}
