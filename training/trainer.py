@@ -1374,7 +1374,9 @@ class Trainer:
                     break
 
                 # LR 下界熔断
-                if current_lr < 1e-7:
+                if current_lr < 1e-7 and (
+                    formal_plan is None or formal_plan["allow_early_stop"]
+                ):
                     stop_reason = f"LR 已降至 {current_lr:.2e}，自动停止训练"
                     print(f"\n{stop_reason} (第 {epoch} 轮)")
                     break

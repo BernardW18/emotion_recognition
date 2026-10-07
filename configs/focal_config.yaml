@@ -1,0 +1,89 @@
+# Arm B: fixed 90-epoch budget, no validation early stopping.
+# Class-specific augmentation is OFF; change one factor between adjacent arms.
+data:
+  dataset_path: data/fer2013.csv
+  image_size: 48
+  num_classes: 7
+  class_names:
+  - Angry
+  - Disgust
+  - Fear
+  - Happy
+  - Sad
+  - Surprise
+  - Neutral
+dataloader:
+  num_workers: 0
+  pin_memory: true
+  persistent_workers: false
+  prefetch_factor: 6
+  class_balanced_sampling: false
+augmentation:
+  enabled: true
+  impl: batched
+  random_horizontal_flip: 0.5
+  random_rotation: 10
+  random_affine_translate: 0.1
+  color_jitter_brightness: 0.2
+  color_jitter_contrast: 0.2
+  random_erase: true
+  class_specific:
+    enabled: false
+    target_classes:
+    - 1
+    augment_prob: 0.8
+    extra_rotation: 20
+    extra_translate: 0.15
+    extra_erase_prob: 0.2
+  mixup:
+    enabled: false
+    alpha: 0.2
+training:
+  batch_size: 128
+  num_epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  optimizer: adam
+  optimizer_fused: false
+  activation: relu
+  scheduler: cosine_warm
+  scheduler_step_size: 10
+  scheduler_gamma: 0.5
+  scheduler_t0: 30
+  patience: 0
+  val_loss_patience: 0
+  val_loss_threshold: 1.05
+  loss_type: focal
+  cb_focal_beta: 0.999
+  amp: true
+  torch_compile: false
+  torch_compile_mode: reduce-overhead
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  cudnn_deterministic: false
+models:
+  mini_cnn:
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
+    dropout: 0.3
+    activation: relu
+  vgg_lite:
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
+    dropout: 0.5
+    activation: relu
+  micro_resnet:
+    learning_rate: 0.0003
+    batch_size: 128
+    num_epochs: 90
+    dropout: 0.3
+    activation: gelu
+    use_se: false
+checkpoint:
+  save_best: true
+  save_every_n_epochs: 5
+  monitor_metric: val_acc
+  max_checkpoint_files: 5
+seed: 42

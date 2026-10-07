@@ -49,7 +49,7 @@ LEGACY_LOGS_DIR = PROJECT_ROOT / "training" / "logs"
 # T06：冻结协议文件（正式训练 --purpose formal 时须存在；冻结流程见
 # docs/comparison_protocol_draft.md §6。格式：{"protocol_id", "frozen_at",
 # "git_commit", ...}；run_meta 记录其 id + 文件字节 SHA-256，判定时复核一致性）
-FROZEN_PROTOCOL_PATH = PROJECT_ROOT / "docs" / "comparison_protocol_frozen.json"
+FROZEN_PROTOCOL_PATH = PROJECT_ROOT / "configs" / "protocols" / "comparison_protocol_frozen.json"
 
 
 class ComparisonSourceError(RuntimeError):
@@ -250,7 +250,7 @@ def validate_comparison_set(
 def check_formal_eligibility(
     run_dir,
     *,
-    frozen_protocol_path: Path = FROZEN_PROTOCOL_PATH,
+    frozen_protocol_path: Path | None = None,
 ) -> dict:
     """
     T06：正式实验准入判定（**与 run-bound 来源状态分离**）。
@@ -311,7 +311,19 @@ def check_formal_eligibility(
     if not isinstance(frozen, dict) or not frozen.get("protocol_id"):
         result["reasons"].append("缺少冻结协议绑定（frozen_protocol 记录）")
     else:
-        fp = Path(frozen_protocol_path)
+        if frozen_protocol_path is not None:
+            fp = Path(frozen_protocol_path)
+        else:
+            bound_path = frozen.get("path")
+            fp = (
+                Path(bound_path)
+                if isinstance(bound_path, str) and bound_path else FROZEN_PROTOCOL_PATH
+            )
+            if not fp.is_file():
+                # Match exact bytes, not user-controlled protocol IDs as path components.
+                matches = [p for p in (PROJECT_ROOT / "configs" / "protocols").glob("*.json")
+                           if file_sha256(p) == frozen.get("file_sha256")]
+                fp = matches[0] if len(matches) == 1 else FROZEN_PROTOCOL_PATH
         if not fp.exists():
             result["reasons"].append(f"冻结协议文件不存在: {fp}")
         elif frozen.get("file_sha256") != file_sha256(fp):
@@ -321,8 +333,10 @@ def check_formal_eligibility(
             )
         else:
             try:
-                record = load_frozen_protocol(fp)
-                if record != frozen:
+                record = load_frozen_protocol(fp, historical=True)
+                if any(record[k] != frozen.get(k) for k in (
+                    "protocol_id", "file_sha256", "manifest",
+                )):
                     raise ValueError("冻结协议 id/实际清单与 run 绑定不一致")
             except (ValueError, KeyError, TypeError) as e:
                 result["reasons"].append(f"冻结协议非法: {e}")
@@ -369,7 +383,7 @@ def check_formal_eligibility(
             if record is None:
                 raise ValueError("缺少合法可执行冻结清单")
             plan = validate_formal_plan(
-                record, last["model_name"], last["model_spec"], protocol
+                record, last["model_name"], last["model_spec"], protocol, historical=True
             )
             reason = completion_reason(plan, last)
             if (reason is None or not meta.get("experiment_completed")

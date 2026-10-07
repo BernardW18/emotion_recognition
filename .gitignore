@@ -26,8 +26,8 @@ __pycache__/
 # Jupyter Notebook 检查点
 .ipynb_checkpoints/
 
-# 项目分析报告
-docs/
+# 本地审核文档（全部保留在本地；可执行协议放在 configs/protocols/）
+/docs/
 
 # 虚拟环境
 venv/

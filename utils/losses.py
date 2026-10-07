@@ -4,13 +4,13 @@
 理论: FL(p_t) = -(1 - p_t)^gamma * log(p_t)
   - gamma > 0 降低易分类样本的 loss 贡献
   - 模型自然聚焦于"难的"样本，无需显式类别加权
-  - gamma=2.0 对 FER2013 类长尾分布效果较好
+  - gamma=2.0 为既定对照设置，实际效果由多 seed 验证集实验判断
 
 Class-Balanced Focal Loss（CVPR 2019）：
   - 基于有效样本数理论 E_n = (1 - beta^n) / (1 - beta)
   - CB 权重 = (1 - beta) / (1 - beta^class_count)
   - beta=0.9 / 0.99 / 0.999 控制"有效样本数"的衰减速率
-  - beta=0.999 对 FER2013 的极度长尾（Disgust 436 样本）效果较好
+  - beta=0.999 为既定对照设置，不预设其收益
 
 用法:
     from utils.losses import FocalLoss, CBFocalLoss
@@ -92,7 +92,7 @@ class CBFocalLoss(nn.Module):
         gamma: Focal Loss 聚焦参数。默认 2.0。
         beta: 有效样本数衰减因子，0 <= beta < 1。
               越接近 1，"有效样本数"越接近真实样本数。
-              FER2013 建议 beta=0.999（Disgust 436 样本的影响显著）。
+              本项目对照使用 beta=0.999；需据 PublicTest 实验核实效果。
         class_counts: 各类别的样本数列表，顺序与 CLASS_NAMES 一致。
                       例如 [4953, 436, 5121, 8989, 6077, 4002, 6198]。
         reduction: 'mean' | 'sum' | 'none'。默认 'mean'。

@@ -2,17 +2,51 @@
 import copy
 import hashlib
 import json
+import re
+import subprocess
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 
 from utils.model_spec import file_sha256
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SOURCE_DIRS = ("models", "data", "training", "inference", "utils", "tools")
+
+
+@lru_cache(maxsize=32)
+def archived_code_fingerprint(commit: str, *, root: Path = PROJECT_ROOT) -> str:
+    """Verify historical code against actual Git blobs, never against a claimed hash alone."""
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise ValueError("历史代码校验需要完整 Git commit SHA")
+
+    def git(*args: str) -> bytes:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(root), *args], check=True, capture_output=True,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise ValueError(f"无法读取冻结提交 {commit} 的代码快照") from exc
+
+    paths = git("ls-tree", "-rz", "--name-only", commit).decode("utf-8").split("\0")
+    selected = [p for p in paths if (
+        p.endswith(".py") and p.split("/", 1)[0] in SOURCE_DIRS
+        or p.startswith("configs/") and p.count("/") == 1 and p.endswith(".yaml")
+    )]
+    if not selected:
+        raise ValueError("冻结提交中没有可验证源码")
+    digest = hashlib.sha256()
+    for path in sorted(selected):
+        digest.update(path.encode("utf-8"))
+        digest.update(hashlib.sha256(git("show", f"{commit}:{path}")).digest())
+    return digest.hexdigest()
+
 
 def code_fingerprint() -> str:
     """Bind executed source/config bytes; documentation or commit-only changes are harmless."""
-    root = Path(__file__).resolve().parent.parent
+    root = PROJECT_ROOT
     files: list[Path] = []
-    for directory in ("models", "data", "training", "inference", "utils", "tools"):
+    for directory in SOURCE_DIRS:
         files.extend((root / directory).rglob("*.py"))
     files.extend((root / "configs").glob("*.yaml"))
     digest = hashlib.sha256()
@@ -28,7 +62,7 @@ def normalized_protocol(protocol):
     return result
 
 
-def load_frozen_protocol(path) -> dict:
+def load_frozen_protocol(path, *, historical: bool = False) -> dict:
     path = Path(path)
     if not path.exists():
         raise ValueError(f"冻结协议文件不存在: {path}")
@@ -39,8 +73,10 @@ def load_frozen_protocol(path) -> dict:
         if not isinstance(body.get(key), str) or not body[key].strip():
             raise ValueError(f"冻结协议缺少 {key}")
     date.fromisoformat(body["frozen_at"])
-    if body.get("code_sha256") != code_fingerprint():
-        raise ValueError("实际源码/配置与冻结代码指纹不一致")
+    if body.get("code_sha256") != code_fingerprint() and (
+        not historical or body.get("code_sha256") != archived_code_fingerprint(body["git_commit"])
+    ):
+        raise ValueError("实际源码/配置或原提交与冻结代码指纹不一致")
     plans = body.get("plans")
     if not isinstance(plans, list) or not plans:
         raise ValueError("冻结协议缺少实际 plans")
@@ -72,16 +108,21 @@ def load_frozen_protocol(path) -> dict:
             raise ValueError("正式比较要求保存 best")
         if type(plan.get("allow_early_stop")) is not bool:
             raise ValueError("须明确冻结 allow_early_stop")
+        runtime = protocol["runtime"]
+        if not plan["allow_early_stop"] and (
+            runtime["patience"] > 0 or runtime["val_loss_patience"] > 0
+        ):
+            raise ValueError("固定预算方案必须关闭两种验证早停")
         if plan.get("lr_floor") != 1e-7:
             raise ValueError("lr_floor 必须与当前 Trainer 的 1e-7 规则一致")
     return {"protocol_id": body["protocol_id"], "file_sha256": file_sha256(path),
             "path": str(path.resolve()), "manifest": body}
 
 
-def validate_formal_plan(record, model_name, model_spec, protocol):
+def validate_formal_plan(record, model_name, model_spec, protocol, *, historical: bool = False):
     if not isinstance(record, dict) or not record.get("path"):
         raise ValueError("缺少可执行冻结协议绑定")
-    current = load_frozen_protocol(record["path"])
+    current = load_frozen_protocol(record["path"], historical=historical)
     if (record.get("protocol_id") != current["protocol_id"]
             or record.get("file_sha256") != current["file_sha256"]):
         raise ValueError("冻结协议绑定不一致（协议 id / file_sha256）")

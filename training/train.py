@@ -38,14 +38,14 @@ from utils.model_spec import build_model_from_spec, make_spec_from_config
 from utils.stdio import ensure_utf8_stdio
 
 
-def _load_frozen_protocol() -> dict:
+def _load_frozen_protocol(path=FROZEN_PROTOCOL_PATH) -> dict:
     """T06：正式训练（--purpose formal）要求冻结协议文件存在且字段齐全。
 
     返回记录（含文件字节 SHA-256），写入 run_meta.frozen_protocol；
     正式实验准入判定时复核该 SHA 与当前文件一致（防止事后更换冻结内容）。
     """
     try:
-        return load_frozen_protocol(FROZEN_PROTOCOL_PATH)
+        return load_frozen_protocol(path)
     except (ValueError, KeyError, TypeError) as e:
         raise SystemExit(f"正式训练需要完整冻结方案：{e}；见协议 §6") from e
 
@@ -88,6 +88,8 @@ def parse_args():
              "CE 基线用 configs/baseline_config.yaml）",
     )
     parser.add_argument("--seed", type=int, default=None, help="随机种子（覆盖 config 中的 seed）")
+    parser.add_argument("--protocol", type=Path, default=FROZEN_PROTOCOL_PATH,
+                        help="正式实验的冻结清单（configs/protocols/ 下的 JSON）")
     parser.add_argument("--lr", type=float, default=None, help="学习率覆盖")
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size 覆盖")
     return parser.parse_args()
@@ -118,7 +120,7 @@ def main():
     validate_config(config, model_name=model_name)
 
     # ---- T06：用途声明与冻结协议绑定（--purpose formal 需冻结文件存在）----
-    frozen_protocol = _load_frozen_protocol() if args.purpose == "formal" else None
+    frozen_protocol = _load_frozen_protocol(args.protocol) if args.purpose == "formal" else None
 
     seed = config["seed"]
     deterministic = bool(config["training"].get("cudnn_deterministic", False))

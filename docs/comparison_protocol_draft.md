@@ -1,3 +1,5 @@
+> docs全部为本地文档；可执行清单保存在configs/protocols。当前新方案按第9节操作，第7–8节为历史记录。
+
 # 模型比较协议（comparison-v2）— CE 第一阶段已冻结
 
 **当前状态：CE 第一阶段已冻结并完成。** 用户确认第一阶段仅执行三个模型的
@@ -115,7 +117,7 @@ CE 第一阶段使用 `configs/baseline_config.yaml`；共同训练设置为：
 
 1. 评审第3节的预算与各臂，将实际实现/配置定稿提交；运行新增的
    tools/freeze_comparison.py --plan MODEL ARM CONFIG（可重复）--seeds 42 43 44
-   --protocol-id 协议名 --output docs/comparison_protocol_frozen.json。
+   --protocol-id 协议名 --output configs/protocols/comparison-v2-frozen1.json。
    工具要求可追溯的干净代码基准，读取真实模型/配置/数据管线，先验证再写文件。
    至少冻结3个不同seeds；每个模型/臂组合唯一，不能用同一实际方案重复命名不同臂。
 2. 冻结文件schema_version=1，包含protocol_id、frozen_at、git_commit、code_sha256及plans。
@@ -133,12 +135,12 @@ CE 第一阶段使用 `configs/baseline_config.yaml`；共同训练设置为：
 
 示例（仅三个模型CE基线A；其他已定义臂需在同一次冻结命令追加实际配置）：
 
-    .\.venv\Scripts\python.exe tools/freeze_comparison.py --protocol-id comparison-v2-frozen1 --output docs/comparison_protocol_frozen.json --seeds 42 43 44 --plan mini_cnn A configs/baseline_config.yaml --plan vgg_lite A configs/baseline_config.yaml --plan micro_resnet A configs/baseline_config.yaml
+    .\.venv\Scripts\python.exe tools/freeze_comparison.py --protocol-id comparison-v2-frozen1 --output configs/protocols/comparison-v2-frozen1.json --seeds 42 43 44 --plan mini_cnn A configs/baseline_config.yaml --plan vgg_lite A configs/baseline_config.yaml --plan micro_resnet A configs/baseline_config.yaml
 
 上面的命令为生成流程示例，不要重新执行或覆盖已创建的 CE 清单。当前第一阶段的
 实际冻结与启动方法见下节；其他臂仍是草案，后续需独立定稿并处理新的协议绑定。
 
-## 7. CE 第一阶段启动清单（2026-10-07）
+## 7. CE 第一阶段启动清单（2026-10-07，历史，已完成）
 
 实际清单 SHA-256：`82089f0cc62e2bc40ffceeee826f72d68d862f7277bfe9ca2733e567d3619ee5`。
 源代码/配置 SHA-256：`a9b05cc1e4abf55561513216f09df491b37c5fdd0700fe7fbc95fa32990dce71`。
@@ -187,4 +189,48 @@ PrivateTest accuracy均值±样本标准差（n=3）：MiniCNN 61.98±2.17%、
 VGGLite 62.24±3.29%、MicroResNet 64.76±0.38%；macro-F1分别52.57±2.89%、
 50.61±3.70%、58.76±1.15%。完整逐run/各类指标与指纹见 `analysis/ce_stage1`。
 本轮仍是官方划分CE基线。早停/重启耦合和少样本类别问题的待验证方案、验收标准见结果文档；
-相关新方案尚未冻结/执行，当前源码和配置保持原样。
+新方案当前操作以第9节为准。
+
+
+## 9. 固定预算与少样本类别对照（当前操作）
+
+代码/配置/验收工具已实现，新36-run正式对照尚未冻结、尚未执行。
+A/B/C/D配置分别为ce_fixed_config.yaml、focal_config.yaml、focal_weighted_config.yaml、cb_focal_weighted_config.yaml。
+共同使用三个现有模型、seeds42/43/44、普通增强、关闭类别专属增强、GPU AMP、完整90轮，
+两种验证早停为0，固定预算忽略低学习率提前结束，PublicTest val_acc选best。
+原允许早停CE不能充当该完整预算协议下的A。
+
+提交本轮代码/配置及configs/protocols/comparison-ce-v1.json，Git干净时冻结全部36组：
+
+```powershell
+$freezeArgs = @('tools/freeze_comparison.py', '--protocol-id', 'comparison-fixed-abcd-v2', '--output', 'configs/protocols/comparison-fixed-abcd-v2.json', '--seeds', '42', '43', '44')
+$arms = [ordered]@{ A = 'configs/ce_fixed_config.yaml'; B = 'configs/focal_config.yaml'; C = 'configs/focal_weighted_config.yaml'; D = 'configs/cb_focal_weighted_config.yaml' }
+foreach ($model in @('mini_cnn', 'vgg_lite', 'micro_resnet')) {
+    foreach ($arm in $arms.Keys) {
+        $freezeArgs += @('--plan', $model, $arm, $arms[$arm])
+    }
+}
+& '.\.venv\Scripts\python.exe' @freezeArgs
+```
+
+提交新冻结JSON一次，这不改变源代码/配置指纹。接通电源、关闭自动睡眠后，第一项：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 training/train.py --protocol configs/protocols/comparison-fixed-abcd-v2.json --purpose formal --config configs/ce_fixed_config.yaml --model mini_cnn --seed 42 --epochs 90
+```
+
+其他项替换模型/配置/seed，从头启动独立run。中断用显式同run完整last和剩余轮数，不对旧CE完成run追加训练。
+全部36个run结束后，汇总命令逐项追加实际run目录：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 tools/summarize_ablation.py --protocol configs/protocols/comparison-fixed-abcd-v2.json --run training/runs/mini_cnn/<实际run_id> --output analysis/fixed_abcd_v2
+```
+
+上式须传全部36个目录，一个run会拒绝。工具先做完整准入/计划检查，再仅评估PublicTest，
+CPU float32/batch64，保存预测和七类支持数/召回及三seed均值±样本std，不覆盖已有输出目录。
+候选须平均Disgust recall>A且macro-F1均值≥A，否则未改善；不预设D更好。
+最终冻结的每个best用统一evaluate_checkpoint入口做一次PrivateTest评估，不据此调整配置。
+验收门槛与本轮验证见PROJECT_REVIEW.md末节。
+
+历史CE清单归档为configs/protocols/comparison-ce-v1.json，原SHA与9个run绑定一致。
+已完成实验按原Git提交快照审核；新训练/续训仍须当前代码匹配。docs移出Git不改变原数值结果。

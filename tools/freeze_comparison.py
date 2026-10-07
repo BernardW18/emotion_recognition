@@ -16,9 +16,11 @@ from training.checkpoint import collect_git_info, write_json_atomic
 from training.trainer import Trainer, load_config
 from utils.formal_protocol import code_fingerprint, load_frozen_protocol
 from utils.model_spec import build_model_from_spec, make_spec_from_config
+from utils.stdio import ensure_utf8_stdio
 
 
 def main():
+    ensure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", action="append", nargs=3, required=True,
                         metavar=("MODEL", "ARM", "CONFIG"))
@@ -48,7 +50,8 @@ def main():
                 "model_spec": spec.to_dict(),
                 "training_protocol": copy.deepcopy(trainer.get_training_protocol()),
                 "max_epochs": trainer.scheduler_num_epochs,
-                "allow_early_stop": True, "lr_floor": 1e-7,
+                "allow_early_stop": trainer.patience > 0 or trainer.val_loss_patience > 0,
+                "lr_floor": 1e-7,
             })
         body = {
             "schema_version": 1, "protocol_id": args.protocol_id,

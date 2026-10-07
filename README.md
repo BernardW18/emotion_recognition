@@ -33,16 +33,17 @@
   `persistent_workers=true` 明确拒绝；中断后同实例继续会自动回滚到完整 last；
   **显式加载 partial 断点同样自动回滚**（无同 run 完整 last 则拒绝，T01）。
 - **run 用途与正式准入（T06）**：`train.py --purpose smoke|formal`（默认 smoke）；
-  正式实验要求冻结协议文件（`docs/comparison_protocol_frozen.json`）存在并绑定入
+  正式实验要求用 `--protocol configs/protocols/<协议名>.json` 指定冻结清单并绑定入
   run_meta（id + 文件 SHA-256）；来源绑定（run-bound）≠ 正式资格，
   正式准入由 `utils.comparison_check.check_formal_eligibility` 独立判定
   （可执行清单/代码指纹/实际配置与数据 + 预算或合规早停 + 真实完整last/best）。
-  分次训练的 session_completed 不能进入正式汇总；冻结工具见协议 §6。
+  分次训练的 session_completed 不能进入正式汇总；用 tools/freeze_comparison.py 冻结。
+  新训练/续训核对当前代码；已完成实验可核对原提交的代码快照，修改代码不会抹去历史资格。
 - **性能（PB01–PB05，历史执行记录）**：批级张量增强（`augmentation.impl`，独立实现，作者短程流程测量提速
   88.4%（workers=0）/ 39.0%（workers=4））；uint8 像素缓存（工厂加载 8.7→0.24s，逐位一致）；
   评估快速路径（完整评估 -96.0%）；Grad-CAM 按需 + 缓存（命中 -92.6%~-95.5%）；
   fused Adam 为可选项（默认关，实测 ~4.9–5.2%）。
-- **质量门槛**：pytest（285 项）+ ruff + mypy（全项目 47 个源文件 0 错误）全部通过。
+- **质量门槛**：项目现有312项pytest用例通过（全量309项后补验路径异常3例，相关模块再次通过）；ruff、mypy（49源文件）及依赖检查通过。
 
 ---
 
@@ -80,11 +81,17 @@ emotion_recognition/
 │   └── constants.py             # 类别名称 / Emoji
 ├── configs/
 │   ├── training_config.yaml     # 集中式训练配置（YAML）
-│   └── baseline_config.yaml     # CE 基线配置（R08：普通采样 + 关类别增强）
+│   ├── baseline_config.yaml     # 历史 CE 第一阶段（允许早停）
+│   ├── ce_fixed_config.yaml     # A：CE + 普通采样，完整90轮
+│   ├── focal_config.yaml        # B：Focal + 普通采样，完整90轮
+│   ├── focal_weighted_config.yaml # C：Focal + 加权采样，完整90轮
+│   ├── cb_focal_weighted_config.yaml # D：CB-Focal + 加权采样，完整90轮
+│   └── protocols/              # 可执行冻结协议，按原始字节纳入Git
 ├── tools/                       # 工具脚本
 │   ├── export_model.py          # 导出权重到推理目录（附来源清单）
 │   ├── evaluate_checkpoint.py   # 统一评估入口的 CLI 包装
 │   ├── data_audit.py            # 数据审计（官方披露 + 敏感性分析）
+│   ├── summarize_ablation.py    # 完整多seed准入与PublicTest少样本类别验收
 │   ├── benchmark_efficiency.py  # 效率基准（参数/MACs/延迟/显存）
 │   └── run_amp_comparison.py    # AMP 配对基准
 ├── analysis/                    # 数据分析与评估结果
@@ -94,9 +101,8 @@ emotion_recognition/
 │   ├── benchmark_amp/           # AMP 配对基准输出
 │   ├── comparison_report.ipynb  # 三模型对比分析
 │   └── confusion_matrices/  roc_curves/  training_curves/
-├── docs/
-│   └── data_audit.md            # 数据重复披露与去重协议草案
-├── tests/                       # 测试（285 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
+├── docs/                        # 全部为本地文档，Git不跟踪；运行不依赖此目录
+├── tests/                       # 测试（312 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
 ├── pyproject.toml               # 项目配置 + ruff + mypy
 ├── requirements.txt             # 依赖安装入口（CUDA 组合）
 └── README.md
@@ -133,10 +139,22 @@ pip install -e ".[dev]"
 
 **当前正式重训第一阶段：CE 基线已完成。** 协议 `comparison-ce-v1`，三个模型各执行
 seeds=42/43/44，共9次，全部正式准入通过；结果见
-[CE第一阶段实验结果](analysis/ce_stage1/RESULTS.md)。启动命令、预算与续训规则见
-[比较协议第7节](docs/comparison_protocol_draft.md#7-ce-第一阶段启动清单2026-10-07)。
-必须显式指定 `--config configs/baseline_config.yaml --purpose formal`；
-下面的通用命令默认属于流程验证，不能代替本次正式CE实验。
+[CE第一阶段实验结果](analysis/ce_stage1/RESULTS.md)。原清单已按相同字节归档到
+`configs/protocols/comparison-ce-v1.json`，用于历史审计。后续 A–D 配置采用相同的完整90轮预算，
+关闭两种验证早停和类别专属增强，每模型/臂至少 seeds=42/43/44；
+只根据 PublicTest 平均 Disgust recall 提升且 macro-F1 均值不下降判断改善。
+当前已实现配置与验收工具，新一轮效果需完整重训验证。
+
+定稿提交后冻结新方案（示例先冻结三个模型的 A；完整消融应追加三个模型的 B/C/D）：
+
+```powershell
+.\.venv\Scripts\python.exe tools/freeze_comparison.py --protocol-id comparison-ce-fixed-v2 --output configs/protocols/comparison-ce-fixed-v2.json --seeds 42 43 44 --plan mini_cnn A configs/ce_fixed_config.yaml --plan vgg_lite A configs/ce_fixed_config.yaml --plan micro_resnet A configs/ce_fixed_config.yaml
+.\.venv\Scripts\python.exe training/train.py --protocol configs/protocols/comparison-ce-fixed-v2.json --config configs/ce_fixed_config.yaml --purpose formal --model mini_cnn --seed 42 --epochs 90
+```
+
+完整消融结束后，用 `tools/summarize_ablation.py --protocol 清单 --run 目录`（逐项追加全部run）
+`--output analysis/新目录` 做准入、完整计划检查和验证集评估。它保存全部七类预测、支持数、均值±样本std；
+缺seed、重复run或混协议都会拒绝。默认 CPU float32/batch64；最终 PrivateTest 评估沿用统一评估入口。
 
 **CLI 方式**（推荐；每次运行创建独立 run 目录）：
 
@@ -245,9 +263,9 @@ FER2013 官方划分存在**跨划分完全重复**：PublicTest 中 280 条、P
 
 - 完整披露、方法与敏感性分析（排除 PrivateTest∩Training 288 条后
   acc 61.04%/63.95%/65.07%、Macro-F1 53.95%/60.30%/60.42%）见
-  [`docs/data_audit.md`](docs/data_audit.md)；可复跑：`python tools/data_audit.py`。
+  本地 `docs/data_audit.md`；可复跑：`python tools/data_audit.py`。
 - 引用本项目分数时请一并披露上述重叠，且**不得声称"数据泄漏已消除"**——
-  本仓库未实施附加去重协议（草案见 docs/data_audit.md §3，未冻结、未使用）。
+  本仓库未实施附加去重协议（本地草案见 docs/data_audit.md §3，未冻结、未使用）。
 - 本审计只覆盖完全相同像素；不主张人员互斥或近重复已排除。
 
 ---
