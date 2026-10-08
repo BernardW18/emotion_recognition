@@ -18,10 +18,11 @@ __pycache__/
 *.egg-info/
 *.pyc
 *.pyo
-*.pyc
 
 # pytest 缓存
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Jupyter Notebook 检查点
 .ipynb_checkpoints/
@@ -61,22 +62,29 @@ data/cache/
 # Legacy training histories are raw experimental output.
 /training/logs/
 
-# Analysis artifact allow-list: publish conclusions/figures, keep raw outputs locally.
+# Local training notebook alternatives; the CLI is the published training entry.
+/training/notebooks/02_train_baseline.ipynb
+/training/notebooks/03_train_vgg.ipynb
+/training/notebooks/04_train_resnet.ipynb
+
+# Analysis publication allow-list. Unlisted outputs remain local.
 /analysis/**
 !/analysis/**/
 !/analysis/README.md
-!/analysis/comparison_report.ipynb
 !/analysis/data_audit.json
 !/analysis/efficiency_results.json
-!/analysis/*.png
-!/analysis/confusion_matrices/*.png
-!/analysis/roc_curves/*.png
-!/analysis/training_curves/*.png
-!/analysis/*/RESULTS.md
-!/analysis/*/aggregate_metrics.json
-!/analysis/*/*.png
-!/analysis/*/*.pdf
-!/analysis/*/*.svg
-!/analysis/*/figures/*.png
-!/analysis/*/figures/*.pdf
-!/analysis/*/figures/*.svg
+!/analysis/class_distribution.png
+!/analysis/sample_visualization.png
+!/analysis/ce_stage1/RESULTS.md
+!/analysis/ce_stage1/aggregate_metrics.json
+!/analysis/benchmark_amp/aggregate_metrics.json
+!/analysis/fixed_abcd_v3/RESULTS.md
+!/analysis/fixed_abcd_v3/aggregate_metrics.json
+!/analysis/fixed_abcd_v3/public_comparison.png
+!/analysis/fixed_abcd_v3/public_comparison.pdf
+!/analysis/architecture_ce_v1/RESULTS.md
+!/analysis/architecture_ce_v1/aggregate_metrics.json
+!/analysis/architecture_ce_v1/architecture_comparison.png
+!/analysis/architecture_ce_v1/architecture_comparison.pdf
+!/analysis/architecture_ce_v1/public_confusion_matrices.png
+!/analysis/architecture_ce_v1/training_curves.png

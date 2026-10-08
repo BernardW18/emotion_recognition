@@ -72,3 +72,31 @@ def test_app_gradcam_toggle_mentions_auxiliary():
         pytest.skip("无 toggle（可能无可用权重）")
     help_text = toggles[0].help or ""
     assert "辅助" in help_text or "不构成" in help_text
+
+
+def test_app_focuses_recommended_model_and_can_reveal_history():
+    from inference.infer_utils import list_available_checkpoints
+
+    items = list_available_checkpoints()
+    recommended = [item for item in items if item["is_default"]]
+    if not recommended or len(items) == len(recommended):
+        pytest.skip("本地没有推荐权重与历史权重的组合")
+    at = _run_app()
+    assert not at.exception
+    assert at.selectbox[0].options == [item["label"] for item in recommended]
+    at.checkbox[0].check().run()
+    assert not at.exception
+    assert at.selectbox[0].options == [item["label"] for item in items]
+    assert at.selectbox[0].value == recommended[0]["label"]
+
+
+def test_app_without_local_weights_still_explains_scope(tmp_path, monkeypatch):
+    from inference import infer_utils
+
+    monkeypatch.setattr(infer_utils, "SAVED_MODELS_DIR", tmp_path)
+    monkeypatch.setattr(infer_utils, "MANIFEST_PATH", tmp_path / "export_manifest.json")
+    at = _run_app()
+    assert not at.exception and not at.selectbox
+    text = "\n".join(m.value for m in at.markdown) + "\n".join(c.value for c in at.caption)
+    assert "已裁剪" in text and "未校准" in text and "不是对真实心理状态的测量" in text
+    assert any("暂无可用权重" in info.value for info in at.info)

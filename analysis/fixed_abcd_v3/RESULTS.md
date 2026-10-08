@@ -51,8 +51,9 @@ A组MicroResNet在本轮的平均accuracy最高；各模型激活/Dropout不同�
 全部best统一CPU float32/batch64评估PublicTest与PrivateTest各一次，72份各3589行预测；
 accuracy/macro-F1/balanced accuracy及七类recall/support均由保存的标签和预测复算一致。
 首组MiniCNN seed42因Windows监控读取干扰原子替换，在完整75轮last处续训到90轮；未重选run/seed。
-251个历史产物SHA一致，课程报告/PPT未修改。官方跨划分像素重复仍存在，不宣称跨人员泛化。
+历史训练与评估归档保留。官方跨划分像素重复仍存在，不宣称跨人员泛化。
 小型、可提交的完整聚合指标与来源SHA见[aggregate_metrics.json](aggregate_metrics.json)。
 可导出图见[PDF](public_comparison.pdf)。完整results.json、runs.csv、evaluations与checkpoint保留本地并忽略，
 这些原始记录不随Git克隆提供；本轮没有删除、改写原始数据或重写Git历史。
-下一阶段[结构实验方案](../../configs/plans/architecture_ce_v1.md)尚未实现/冻结/执行，不把方案当作新实验结果。
+后续[MicroResNet结构实验](../architecture_ce_v1/RESULTS.md)已完成12次完整90轮训练；
+S1通过其预设质量与部署门槛，并已用于推理演示。两轮协议分别报告，不混合排名。

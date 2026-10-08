@@ -7,12 +7,12 @@
 ## 1. 研究问题与已有证据
 
 问题：有限计算量下，当前表情识别更需要增加网络容量，还是在早期保留局部细节？
-不预设加深、延后池化或 SE 必然有效。依据赵凯的公开研究介绍，将质量与计算效率一起评价：
-[赵凯研究介绍](https://kaizhao.net/research)。本方案是现有项目的结构消融，不宣称为原创网络方法。
+不预设加深、延后池化或SE必然有效，同时评价质量与计算效率。
+本方案是现有项目的受控结构比较，不宣称为原创网络方法。
 
 已完成的 `comparison-fixed-abcd-v3` 是损失/采样对照，不是深度消融；36/36 run 完整90轮。
 MicroResNet 的 CE PublicTest accuracy=67.12±0.22%、macro-F1=63.94±0.26%（三seed、样本标准差）。
-其三个 CE best 在本对话补充的无增强、CPU float32/batch64、eval 模式 Training 诊断中，
+其三个CE best在无增强、CPU float32/batch64、eval模式的Training诊断中，
 accuracy 均值78.01%、macro-F1均值77.27%。约10.9个百分点的准确率差距提示泛化问题，
 不能单凭此排除容量不足或断言已定位过拟合。诊断没有重训或再次访问 PrivateTest。
 当前4个残差块、753,991参数；单层3×3 stem 后连续两次池化，进入 stage1 前已是12×12。
@@ -130,7 +130,7 @@ CPU float32/batch1与GPU float32/batch1模型前向：预热20次，正式100次
 ## 7. 成果与Git边界
 
 Git保留：本设计稿、源码/配置/冻结清单、`analysis/<实验>/RESULTS.md`、
-`aggregate_metrics.json`（小型聚合结果及来源SHA）、图表PNG/PDF/SVG、分析源Notebook。
+`aggregate_metrics.json`（小型聚合结果及来源SHA）、明确发布的图表PNG/PDF/SVG；数据探索源码单独保留。
 本地保留但不跟踪：CSV、逐样本预测、每run完整JSON/历史、checkpoint、缓存、原始基准重复记录。
 `docs/`全部继续忽略；课程报告/PPT不修改；历史文件不因取消跟踪而删除，也不重写Git历史。
 
@@ -146,8 +146,8 @@ Git保留：本设计稿、源码/配置/冻结清单、`analysis/<实验>/RESUL
 候选保存时间和SHA后才访问PrivateTest。原始数据在 `analysis/architecture_ce_v1/` 本地保留，
 Git仅追踪RESULTS、聚合摘要和图表。工具运行不依赖docs目录。
 
-`docs/`是用户要求整目录忽略的本地审核区；本方案需要随源码保留和追溯，
-因此唯一版本化方案放在 `configs/plans/`，本地docs只记录审核和执行状态。
+本方案位于`configs/plans/`并纳入版本控制，审核与执行进度保留本地。
+环境和新实验冻结操作见[复现说明](../../REPRODUCIBILITY.md)。
 
 ## 9. 本轮冻结与实现验收
 
@@ -156,11 +156,8 @@ Git仅追踪RESULTS、聚合摘要和图表。工具运行不依赖docs目录。
 冻结清单：`configs/protocols/comparison-architecture-ce-v1.json`，4臂×3seed、每run90轮。
 冻结文件SHA-256：`ad03786c6153a87e04da046ddee0240c07637b46c4937f1270026513e22b6245`。旧A–D冻结文件不变。
 
-完整pytest336项通过；随后新增/强化结构逻辑的25项针对性回归通过，合计339个唯一用例。
-Ruff、mypy40源文件、pip check通过；S0与8aaf41b之前原模型的初始化权重/CPU前向逐位一致，
-旧v1加载一致；四组真实模型连续与恢复训练一致，错误池化协议拒绝且不改参数；
-CPU/CUDA batch1与batch128形状正确，CUDA batch128 AMP有有效更新且参数有限。
-实测参数/MACs已列在第二节。251个历史产物SHA一致，报告/PPT未修改。
+正式准入验证实际模型、配置、数据、90轮完成状态与原提交；
+模型规格兼容、真实更新和恢复一致性由源码及回归测试保留。
 
 ## 10. 执行结果（2026-10-08 19:21，Asia/Shanghai）
 
@@ -173,7 +170,7 @@ S3未过质量门槛。三seed为描述性证据，保留负结果。
 
 ## 11. S1采用与推理验收
 
-用户确认采用S1后，独立导出 `micro_resnet_s1_20261008_182922_seed43.pth` 并设为应用默认。
+推理演示独立导出 `micro_resnet_s1_20261008_182922_seed43.pth` 并设为应用默认。
 S1三个run按PublicTest CPU float32宏F1降序、accuracy降序、seed升序选择演示checkpoint，
 得到seed43、best epoch82，Public accuracy68.49%、macro-F1 66.46%。
 此单checkpoint选择发生在实验完成后，未读取Private指标作为选择输入；
@@ -181,6 +178,6 @@ S1三个run按PublicTest CPU float32宏F1降序、accuracy降序、seed升序选
 
 来源与导出SHA相同；全3,589张Public图像源/导出CPU概率逐位一致并复现归档类别，
 28张覆盖七类的CPU/GPU单图类别一致，Grad-CAM及缓存验收通过；28项针对性回归通过。
-原957项实验/历史文件SHA不变，已有6项导出清单记录保留；仅新增独立权重与默认来源记录。
+原训练与评估归档保留，演示权重以独立文件导出。
 推理默认与简要验收追踪在 `inference/saved_models/export_manifest.json`，
-详细记录位于本地忽略的 `docs/S1_DEPLOYMENT.md`，原始预测和权重不进入Git。
+[复现说明](../../REPRODUCIBILITY.md)介绍运行入口；原始预测和权重不进入Git。

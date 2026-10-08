@@ -1,7 +1,7 @@
 """
 比较来源一致性校验（S04）与正式实验准入（T06）
 
-比较 Notebook（analysis/comparison_report.ipynb）与正式比较流程共用本模块：
+正式比较与评估工具共用本模块：
 
   1) **来源绑定**（S04，validate_comparison_set）：把每个模型的 checkpoint 与 history
      绑定为可校验的“来源清单”，区分两种状态：
@@ -47,7 +47,7 @@ RUNS_DIR = PROJECT_ROOT / "training" / "runs"
 LEGACY_LOGS_DIR = PROJECT_ROOT / "training" / "logs"
 
 # T06：冻结协议文件（正式训练 --purpose formal 时须存在；冻结流程见
-# docs/comparison_protocol_draft.md §6。格式：{"protocol_id", "frozen_at",
+# REPRODUCIBILITY.md。格式：{"protocol_id", "frozen_at",
 # "git_commit", ...}；run_meta 记录其 id + 文件字节 SHA-256，判定时复核一致性）
 FROZEN_PROTOCOL_PATH = PROJECT_ROOT / "configs" / "protocols" / "comparison_protocol_frozen.json"
 
@@ -241,7 +241,7 @@ def validate_comparison_set(
             raise ComparisonSourceError(
                 "来源绑定组要求共享同一训练协议；"
                 f"当前 protocol_digest={sorted(map(str, digests))}——"
-                "请确认所有 run 使用同一冻结协议（docs/comparison_protocol_draft.md）；"
+                "请确认所有 run 使用同一冻结协议（configs/protocols/）；"
                 "正式实验准入另行判定（check_formal_eligibility）。"
             )
     return reports

@@ -68,16 +68,15 @@ with st.sidebar:
     st.header("⚙️ 模型设置")
 
     checkpoints = list_available_checkpoints()
+    recommended = [it for it in checkpoints if it["is_default"]]
+    if recommended and len(checkpoints) > len(recommended):
+        show_history = st.checkbox("显示历史与验证权重", value=False)
+        if not show_history:
+            checkpoints = recommended
 
     if not checkpoints:
         st.warning(
-            "未找到可用权重。\n\n"
-            "训练后请显式导出到推理目录：\n"
-            "```bash\n"
-            "python training/train.py --model mini_cnn --epochs 30\n"
-            "python tools/export_model.py --checkpoint "
-            "training/runs/<模型>/<run_id>/checkpoints/best.pth\n"
-            "```"
+            "未找到可用权重。请按项目 README 的「导出与推理应用」说明准备模型。"
         )
     else:
         labels = [it["label"] for it in checkpoints]
@@ -90,29 +89,33 @@ with st.sidebar:
         if selected_item["legacy"]:
             st.warning(
                 "该权重为 legacy 旧产物（旧格式断点，来源/配置信息不全），"
-                "按确定性迁移规则解析，迁移依据见下方「迁移/配置说明」。"
+                "按确定性迁移规则解析，迁移依据见下方「权重来源与配置」。"
             )
 
         st.divider()
-        st.subheader("📋 权重信息")
+        st.subheader("📋 当前模型")
         mtime = Path(selected_item["path"]).stat().st_mtime
         info = describe_checkpoint_cached(selected_item["path"], mtime)
         spec = info["model_spec"]
-        st.markdown(f"**规格**: {spec['model_name']} | 类别数 {len(spec['class_names'])}")
-        st.markdown(
-            f"**激活/正则**: activation={spec['activation']} | "
-            f"dropout={spec['dropout']} | use_se={spec['use_se']}"
-        )
+        source = selected_item.get("source") or {}
+        arm = source.get("deployment", {}).get("arm")
+        model_label = f"{arm} · {spec['model_name']}" if arm else spec["model_name"]
+        st.markdown(f"**模型**: {model_label} | 类别数 {len(spec['class_names'])}")
         st.markdown(f"**参数量**: {info['params_total']:,}")
-        st.markdown(f"**SHA-256**: `{info['sha256'][:16]}...`")
-        if info["metrics"].get("val_acc"):
-            m = info["metrics"]
-            st.markdown(f"**记录指标**: epoch={m.get('epoch')} val_acc={m.get('val_acc'):.4f}")
-        source = selected_item.get("source")
-        if source:
-            st.markdown(f"**来源**: run `{source.get('run_id')}`")
-            st.caption(f"源文件: {source.get('source_checkpoint')}")
-        with st.expander("迁移/配置说明", expanded=False):
+        with st.expander("权重来源与配置", expanded=False):
+            st.markdown(
+                f"**激活/正则**: activation={spec['activation']} | "
+                f"dropout={spec['dropout']} | use_se={spec['use_se']}"
+            )
+            st.markdown(f"**SHA-256**: `{info['sha256'][:16]}...`")
+            if info["metrics"].get("val_acc"):
+                m = info["metrics"]
+                st.markdown(
+                    f"**记录指标**: epoch={m.get('epoch')} val_acc={m.get('val_acc'):.4f}"
+                )
+            if source:
+                st.markdown(f"**来源**: run `{source.get('run_id')}`")
+                st.caption(f"源文件: {source.get('source_checkpoint')}")
             for note in info["spec_notes"]:
                 st.markdown(f"- {note}")
 
@@ -134,19 +137,16 @@ with st.sidebar:
 # ==============================
 st.title("🎭 人脸表情识别（FER2013 类别预测）")
 
-if selected_item is None:
-    st.info(
-        "推理目录暂无可用权重。请先训练模型并用 `tools/export_model.py` 显式导出，"
-        "然后刷新本页面。"
-    )
-    st.stop()
-
 st.markdown("上传一张**已裁剪的单张人脸**图像，模型将预测其 FER2013 七类表情类别。")
 st.caption(
     "输入要求：接近训练域的正面人脸（居中的单张人脸；越接近 48×48 灰度的证件照构图越可靠）。"
     "整张生活照、多人合影或未裁剪图像不适合本演示；本应用不做人脸检测与对齐。"
     "输出为数据集表情类别预测与未校准概率，不是对真实心理状态的测量。"
 )
+
+if selected_item is None:
+    st.info("推理目录暂无可用权重。请按 README 准备模型，然后刷新本页面。")
+    st.stop()
 
 # 图像上传
 col1, col2 = st.columns(2)
