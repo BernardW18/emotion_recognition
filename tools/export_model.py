@@ -12,7 +12,7 @@
     entry = export_checkpoint("training/runs/micro_resnet/<run_id>/checkpoints/best.pth")
 
 命令行用法:
-    python tools/export_model.py --checkpoint <path> [--name NAME] [--force]
+    python tools/export_model.py --checkpoint <path> [--name NAME] [--force] [--default]
     python tools/export_model.py --list
 """
 import argparse
@@ -55,7 +55,9 @@ def _load_manifest() -> dict:
     return {"exports": []}
 
 
-def export_checkpoint(checkpoint_path, *, name: str | None = None, force: bool = False) -> dict:
+def export_checkpoint(
+    checkpoint_path, *, name: str | None = None, force: bool = False, make_default: bool = False
+) -> dict:
     """
     导出单个断点到推理目录并登记清单。
 
@@ -63,6 +65,7 @@ def export_checkpoint(checkpoint_path, *, name: str | None = None, force: bool =
         checkpoint_path: 源断点路径
         name: 导出名称（不含 .pth；默认 <模型名>_<run_id>）
         force: 覆盖已存在的同名文件
+        make_default: 将本次导出设为推理应用默认权重（其他导出不改变默认项）
 
     Returns:
         manifest 中的 entry dict
@@ -124,6 +127,8 @@ def export_checkpoint(checkpoint_path, *, name: str | None = None, force: bool =
     exports = [e for e in manifest["exports"] if e.get("file") != dst.name]
     exports.append(entry)
     manifest["exports"] = exports
+    if make_default:
+        manifest["default_checkpoint"] = dst.name
     manifest["updated_at"] = datetime.now().isoformat()
     write_json_atomic(MANIFEST_PATH, manifest)
     return entry
@@ -153,6 +158,7 @@ def main():
     parser.add_argument("--name", type=str, default=None,
                         help="导出名称（不含 .pth；默认 <模型名>_<run_id>）")
     parser.add_argument("--force", action="store_true", help="覆盖已存在的同名导出")
+    parser.add_argument("--default", action="store_true", help="将本次导出设为推理应用默认权重")
     parser.add_argument("--list", action="store_true", help="列出现有导出与来源")
     args = parser.parse_args()
 
@@ -164,7 +170,9 @@ def main():
         parser.error("需要 --checkpoint <路径>（或使用 --list）")
 
     try:
-        entry = export_checkpoint(args.checkpoint, name=args.name, force=args.force)
+        entry = export_checkpoint(
+            args.checkpoint, name=args.name, force=args.force, make_default=args.default
+        )
     except (FileNotFoundError, ValueError, FileExistsError, RuntimeError) as e:
         raise SystemExit(f"错误: {e}") from e
 

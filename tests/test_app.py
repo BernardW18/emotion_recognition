@@ -52,6 +52,18 @@ def test_app_sidebar_lists_checkpoint_with_source():
     )
 
 
+def test_app_selects_manifest_default_instead_of_first_filename():
+    from inference.infer_utils import list_available_checkpoints
+
+    items = list_available_checkpoints()
+    if not items:
+        pytest.skip("saved_models 为空")
+    expected = next((item for item in items if item["is_default"]), items[0])
+    at = _run_app()
+    assert not at.exception
+    assert at.selectbox[0].value == expected["label"]
+
+
 def test_app_gradcam_toggle_mentions_auxiliary():
     """F17：Grad-CAM 的表述为辅助可视化，不宣称因果解释。"""
     at = _run_app()

@@ -169,4 +169,18 @@ S1通过质量与部署门槛，Public accuracy相对S0+1.64pp、macro-F1+2.66pp
 参数仍753,991，CPU P95约1.28倍。S2质量通过但CPU P95约1.78倍，未过部署门槛；
 S3未过质量门槛。三seed为描述性证据，保留负结果。
 结论、七类统计和图表见[RESULTS](../../analysis/architecture_ce_v1/RESULTS.md)。
-总执行约74.6分钟；历史归档在执行结束时SHA验证一致。演示权重未自动替换。
+总执行约74.6分钟；历史归档在执行结束时SHA验证一致。
+
+## 11. S1采用与推理验收
+
+用户确认采用S1后，独立导出 `micro_resnet_s1_20261008_182922_seed43.pth` 并设为应用默认。
+S1三个run按PublicTest CPU float32宏F1降序、accuracy降序、seed升序选择演示checkpoint，
+得到seed43、best epoch82，Public accuracy68.49%、macro-F1 66.46%。
+此单checkpoint选择发生在实验完成后，未读取Private指标作为选择输入；
+不改变原先Private之前固定的S1臂选择，也不替代三seed研究汇总。
+
+来源与导出SHA相同；全3,589张Public图像源/导出CPU概率逐位一致并复现归档类别，
+28张覆盖七类的CPU/GPU单图类别一致，Grad-CAM及缓存验收通过；28项针对性回归通过。
+原957项实验/历史文件SHA不变，已有6项导出清单记录保留；仅新增独立权重与默认来源记录。
+推理默认与简要验收追踪在 `inference/saved_models/export_manifest.json`，
+详细记录位于本地忽略的 `docs/S1_DEPLOYMENT.md`，原始预测和权重不进入Git。

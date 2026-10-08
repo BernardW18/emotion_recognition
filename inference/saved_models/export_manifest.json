@@ -259,7 +259,96 @@
         "val_acc": 0.4416272044181824,
         "best_val_acc": 0.4416272044181824
       }
+    },
+    {
+      "file": "micro_resnet_s1_20261008_182922_seed43.pth",
+      "model_name": "micro_resnet",
+      "run_id": "20261008_182922_seed43",
+      "legacy": false,
+      "format_version": 3,
+      "source_checkpoint": "training\\runs\\micro_resnet\\20261008_182922_seed43\\checkpoints\\best.pth",
+      "source_sha256": "0dd03731ae9a056f8ac6081122b827d43c836ed4b32b4e0870a8c712afc6216f",
+      "exported_sha256": "0dd03731ae9a056f8ac6081122b827d43c836ed4b32b4e0870a8c712afc6216f",
+      "exported_at": "2026-10-08T19:39:24.913958",
+      "model_spec": {
+        "spec_version": 2,
+        "model_name": "micro_resnet",
+        "class_names": [
+          "Angry",
+          "Disgust",
+          "Fear",
+          "Happy",
+          "Sad",
+          "Surprise",
+          "Neutral"
+        ],
+        "activation": "gelu",
+        "dropout": 0.3,
+        "use_se": false,
+        "input_channels": 1,
+        "image_size": 48,
+        "normalize": "x/255.0",
+        "spec_source": "training",
+        "migration_notes": [],
+        "blocks": [
+          2,
+          2
+        ],
+        "channels": [
+          64,
+          128
+        ],
+        "pool_order": "after_stage1"
+      },
+      "spec_notes": [
+        "model_spec v2（来源: training）"
+      ],
+      "metrics": {
+        "epoch": 82,
+        "val_acc": 0.6848704814910889,
+        "best_val_acc": 0.6848704814910889
+      },
+      "deployment": {
+        "arm": "S1",
+        "seed": 43,
+        "adopted_at": "2026-10-08T19:46:56.110449",
+        "protocol_id": "comparison-architecture-ce-v1",
+        "protocol_sha256": "ad03786c6153a87e04da046ddee0240c07637b46c4937f1270026513e22b6245",
+        "selection_rule": "PublicTest CPU float32 macro_f1 descending, accuracy descending, seed ascending; no PrivateTest input",
+        "selection_scope": "Representative deployment checkpoint chosen after the experiment; three-seed research aggregates unchanged",
+        "public_accuracy": 0.684870437447757,
+        "public_macro_f1": 0.664618293214166,
+        "public_summary": "analysis/architecture_ce_v1/evaluations/S1/43/PublicTest/summary.json",
+        "public_summary_sha256": "07eb363c1f5f30f841d1ef0ed46e6bc0d5ac0e1044118097f191223843538152",
+        "validation": {
+          "export_sha256_matches_source": true,
+          "source_export_probs_bitwise_equal": true,
+          "public_samples": 3589,
+          "public_predictions_match_archive": true,
+          "max_archived_probability_difference": 5.274162292456808e-07,
+          "cpu_app_samples": 28,
+          "cpu_app_predictions_match_offline": true,
+          "cpu_app_max_probability_difference": 3.5762786865234375e-07,
+          "gradcam_classes": 7,
+          "hooks_and_weights_unchanged": true,
+          "service_png_and_cache_passed": true,
+          "gpu": {
+            "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+            "samples": 28,
+            "predictions_match_cpu": true,
+            "tf32_matmul": false,
+            "tf32_cudnn": true,
+            "default_max_probability_difference": 0.00017213821411132812,
+            "default_absolute_tolerance": 0.001,
+            "tf32_off_max_probability_difference": 2.4437904357910156e-06,
+            "tf32_off_absolute_tolerance": 2e-05,
+            "gradcam_passed": true
+          },
+          "protected_artifacts_unchanged": 957
+        }
+      }
     }
   ],
-  "updated_at": "2026-10-07T04:19:26.890165"
+  "updated_at": "2026-10-08T19:46:56.110449",
+  "default_checkpoint": "micro_resnet_s1_20261008_182922_seed43.pth"
 }

@@ -66,7 +66,7 @@ def list_available_checkpoints() -> list[dict]:
     列出推理目录下全部权重文件（含导出清单来源信息与 legacy 标记）。
 
     Returns:
-        [{"file", "path", "label", "model_name", "legacy", "source"}]
+        [{"file", "path", "label", "model_name", "legacy", "source", "is_default"}]
     """
     manifest = read_export_manifest()
     by_file = {e.get("file"): e for e in manifest["exports"]}
@@ -95,6 +95,9 @@ def list_available_checkpoints() -> list[dict]:
         else:
             label = f"{model_name} | {path.stem} | [无来源记录·旧产物]"
 
+        is_default = path.name == manifest.get("default_checkpoint") and entry is not None
+        if is_default:
+            label = f"[推荐] {label}"
         items.append({
             "file": path.name,
             "path": str(path),
@@ -102,6 +105,7 @@ def list_available_checkpoints() -> list[dict]:
             "model_name": model_name,
             "legacy": legacy,
             "source": entry,
+            "is_default": is_default,
         })
     return items
 

@@ -145,7 +145,7 @@ pip install -e ".[dev]"
 各3seed，共12个run，已于2026-10-08完整训练90轮并完成Training/Public/Private共36份评估。
 协议 `comparison-architecture-ce-v1`；Public预设标准选择S1（延后池化），准确率+1.64pp、宏F1+2.66pp，
 参数量不变，CPU P95约为S0的1.28倍。[结构实验结论与图表](analysis/architecture_ce_v1/RESULTS.md)。
-推理演示权重尚未更新；完整原始预测/运行记录继续保留本地。
+推理演示已采用S1的seed43权重，按Public宏F1选择并设为默认；原始预测/运行记录继续保留本地。
 
 本轮结构实验的执行入口（已存在执行记录时必须用 `--resume` 继续同run）：
 
@@ -224,9 +224,30 @@ jupyter notebook analysis/comparison_report.ipynb
 # 显式导出（写 export_manifest.json；默认不覆盖同名文件）
 python tools/export_model.py --list
 python tools/export_model.py --checkpoint training/runs/<模型>/<run_id>/checkpoints/best.pth
+# 指定本次导出为应用默认（仍不覆盖已有同名文件）
+python tools/export_model.py --checkpoint <checkpoint> --name <新名称> --default
 
 # 启动推理应用
 streamlit run inference/app.py    # 或 python run_app.py
+```
+
+当前默认为 **S1（延后第一组平均池化，seed43）**，来源
+`20261008_182922_seed43/checkpoints/best.pth`，epoch82；PublicTest accuracy68.49%、macro-F1 66.46%。
+在S1的三个已完成run中按Public宏F1、accuracy、较小seed依次排序选择；Private不参与选择。
+这是本轮结束后选择的演示用单checkpoint，研究比较仍引用三个seed的均值±标准差。
+默认项与来源、SHA、验收摘要见[导出清单](inference/saved_models/export_manifest.json)。
+旧权重可继续手动选择；未设置默认项或对应文件不存在时，应用回退到可用列表首项。
+
+验收：全部3,589张Public图像导出前后CPU概率逐位一致，类别与归档一致；
+每类4张、共28张单图CPU/GPU类别一致，7类CPU及GPU样例Grad-CAM通过。
+GPU默认cuDNN TF32的概率最大绝对差约1.72e-4，关闭TF32为2.44e-6；
+未因此更改正式CPU评估或默认GPU精度。默认选择、导出保护、推理及缓存28项回归通过。
+详细验收记录位于本地 `docs/S1_DEPLOYMENT.md`；docs、权重与原始预测继续被Git忽略。
+
+在Windows项目虚拟环境启动：
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run inference/app.py
 ```
 
 推理应用的范围（明确限定）：**已裁剪的单张人脸**表情类别预测（接近 48×48 灰度训练域）；

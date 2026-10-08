@@ -296,7 +296,9 @@ def finalize(record, run_dirs, output):
     text += [
         "",
         f"候选：**{selection['candidate']}**；在PrivateTest前于{selection['fixed_at']}固定。",
-        "Private只作最终报告，没有据其调参或改变候选；此处候选不等于已更新推理演示权重。",
+        "Private只作最终报告，没有据其调参或改变候选。",
+        "当前推理默认与采用验收见[项目说明](../../README.md#5-导出与推理应用)，"
+        "来源见[导出清单](../../inference/saved_models/export_manifest.json)。",
         "",
         "## 无增强Training诊断",
         "",

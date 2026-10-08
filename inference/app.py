@@ -81,7 +81,10 @@ with st.sidebar:
         )
     else:
         labels = [it["label"] for it in checkpoints]
-        choice = st.selectbox("选择权重（含来源信息）", labels, index=0)
+        default_index = next(
+            (i for i, it in enumerate(checkpoints) if it["is_default"]), 0
+        )
+        choice = st.selectbox("选择权重（含来源信息）", labels, index=default_index)
         selected_item = next(it for it in checkpoints if it["label"] == choice)
 
         if selected_item["legacy"]:
