@@ -57,3 +57,26 @@ analysis_saved/
 
 # 像素缓存（PB02：可从 data/fer2013.csv 重建的派生物，不入版本控制）
 data/cache/
+
+# Legacy training histories are raw experimental output.
+/training/logs/
+
+# Analysis artifact allow-list: publish conclusions/figures, keep raw outputs locally.
+/analysis/**
+!/analysis/**/
+!/analysis/README.md
+!/analysis/comparison_report.ipynb
+!/analysis/data_audit.json
+!/analysis/efficiency_results.json
+!/analysis/*.png
+!/analysis/confusion_matrices/*.png
+!/analysis/roc_curves/*.png
+!/analysis/training_curves/*.png
+!/analysis/*/RESULTS.md
+!/analysis/*/aggregate_metrics.json
+!/analysis/*/*.png
+!/analysis/*/*.pdf
+!/analysis/*/*.svg
+!/analysis/*/figures/*.png
+!/analysis/*/figures/*.pdf
+!/analysis/*/figures/*.svg
