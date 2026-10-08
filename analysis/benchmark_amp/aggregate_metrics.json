@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "role": "aggregate historical benchmark; no raw pair records",
+  "generated_at": "2026-10-07T02:21:28.362238",
+  "environment": {
+    "device": "NVIDIA GeForce RTX 5070 Ti Laptop GPU",
+    "cuda": "13.0",
+    "torch": "2.14.1+cu130"
+  },
+  "protocol": {
+    "pairs_per_model": 3,
+    "setup": "每对 OFF/ON 同一初始 state_dict、同一 RNG 起点、同一数据顺序",
+    "order": "交替（OFF→ON / ON→OFF / OFF→ON）",
+    "warmup": "一次性副本预热后丢弃",
+    "epochs_per_run": 1,
+    "step_measure_steps": 20,
+    "num_workers": 0,
+    "loss": "focal",
+    "random_seed": 42
+  },
+  "source_results_sha256": "99fc88c1e4ca6b70d7f8366d2d54db959774dd92540e30c97fa087d82196af07",
+  "models": {
+    "mini_cnn": {
+      "off_process_median_s": 20.724996400000236,
+      "on_process_median_s": 20.67659889999959,
+      "process_speedup_median": 1.0023406895996154,
+      "off_step_median_ms": 12.345100000857201,
+      "on_step_median_ms": 8.58535000043048,
+      "step_ratio_median": 1.4115735893030141,
+      "all_batch_orders_match": true,
+      "any_loss_nan_inf": false,
+      "any_grad_nan_inf": false
+    },
+    "vgg_lite": {
+      "off_process_median_s": 24.980808099999194,
+      "on_process_median_s": 22.566653199999564,
+      "process_speedup_median": 1.1034213837256177,
+      "off_step_median_ms": 27.404899999964982,
+      "on_step_median_ms": 16.587600000093516,
+      "step_ratio_median": 1.652131712834315,
+      "all_batch_orders_match": true,
+      "any_loss_nan_inf": false,
+      "any_grad_nan_inf": false
+    },
+    "micro_resnet": {
+      "off_process_median_s": 21.0216356000019,
+      "on_process_median_s": 20.924867100000483,
+      "process_speedup_median": 0.9968175950804435,
+      "off_step_median_ms": 10.581850000562554,
+      "on_step_median_ms": 10.420199999316537,
+      "step_ratio_median": 1.0047791790718734,
+      "all_batch_orders_match": true,
+      "any_loss_nan_inf": false,
+      "any_grad_nan_inf": false
+    }
+  },
+  "formal_artifacts_unchanged": true
+}

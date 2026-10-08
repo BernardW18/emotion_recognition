@@ -7,7 +7,7 @@
 
 问题：有限计算量下，当前表情识别更需要增加网络容量，还是在早期保留局部细节？
 不预设加深、延后池化或 SE 必然有效。依据赵凯的公开研究介绍，将质量与计算效率一起评价：
-https://kaizhao.net/research 。本方案是现有项目的结构消融，不宣称为原创网络方法。
+[赵凯研究介绍](https://kaizhao.net/research)。本方案是现有项目的结构消融，不宣称为原创网络方法。
 
 已完成的 `comparison-fixed-abcd-v3` 是损失/采样对照，不是深度消融；36/36 run 完整90轮。
 MicroResNet 的 CE PublicTest accuracy=67.12±0.22%、macro-F1=63.94±0.26%（三seed、样本标准差）。

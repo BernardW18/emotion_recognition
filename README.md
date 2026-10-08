@@ -137,13 +137,14 @@ pip install -e ".[dev]"
 
 ### 3. 训练模型
 
-**当前正式重训第一阶段：CE 基线已完成。** 协议 `comparison-ce-v1`，三个模型各执行
-seeds=42/43/44，共9次，全部正式准入通过；结果见
-[CE第一阶段实验结果](analysis/ce_stage1/RESULTS.md)。原清单已按相同字节归档到
-`configs/protocols/comparison-ce-v1.json`，用于历史审计。后续 A–D 配置采用相同的完整90轮预算，
-关闭两种验证早停和类别专属增强，每模型/臂至少 seeds=42/43/44；
-只根据 PublicTest 平均 Disgust recall 提升且 macro-F1 均值不下降判断改善。
-当前已实现配置与验收工具，新一轮效果需完整重训验证。
+**当前正式实验：固定90轮A–D已完成。** `comparison-fixed-abcd-v3`，三模型×四臂×seeds42/43/44，
+36个run均完整90轮并通过准入；Public/Private共72份评估，候选判断只用PublicTest。
+[固定预算结论与图表](analysis/fixed_abcd_v3/RESULTS.md)、[聚合指标](analysis/fixed_abcd_v3/aggregate_metrics.json)。
+历史允许早停CE的9个run单独保留，不能混为完整90轮基线。
+下一轮为[MicroResNet结构对照方案](configs/plans/architecture_ce_v1.md)：S0原结构、S1延后池化、S2加深、S3 SE，
+各3seed，共12个run；目前是设计稿，尚未实现变体、生成可执行冻结清单或启动新训练。
+
+下面是未来新协议的冻结示例，不能用它覆盖已完成协议；实现及回归完成后再冻结实际结构配置。
 
 定稿提交后冻结新方案（示例先冻结三个模型的 A；完整消融应追加三个模型的 B/C/D）：
 
@@ -235,9 +236,9 @@ streamlit run inference/app.py    # 或 python run_app.py
 | MicroResNet | 64.76 ± 0.38 | 58.76 ± 1.15 | 58.34 ± 0.87 | 29.09 ± 5.45 |
 
 这是官方划分的CE基线结果，保留跨划分重复披露。三种子波动和早停轮数均如实保留；
-其他损失/采样臂尚未执行，历史不同配置权重不作为受控对照。
+这张历史CE表允许早停；已完成的A–D完整90轮结果见[独立结论](analysis/fixed_abcd_v3/RESULTS.md)，两者不混合汇总。
 逐run结果、权重/数据指纹、逐样本预测与问题/方案/验收标准见
-[RESULTS.md](analysis/ce_stage1/RESULTS.md)及[results.json](analysis/ce_stage1/results.json)。
+[RESULTS.md](analysis/ce_stage1/RESULTS.md)及[聚合指标](analysis/ce_stage1/aggregate_metrics.json)。完整原始记录仅保留本地。
 
 ### 历史权重评估（legacy）
 
@@ -310,7 +311,7 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 > （约 -30%～-45%）**；端到端完整流程（1 epoch + eval）加速为 1.00–1.10x。
 > **不做单步时间到完整训练的线性外推**（旧文档中「1.4–1.8 倍加速」的说法在此口径下不成立）。
 > 全部 9 组配对的输入批次顺序经哈希验证一致；基准前后正式权重与日志 SHA-256 未变。
-> 完整协议与逐配对原始数据：`analysis/benchmark_amp/results.json`。
+> 可提交的[聚合结果](analysis/benchmark_amp/aggregate_metrics.json)保留协议与来源SHA；逐配对原始数据 `analysis/benchmark_amp/results.json` 仅保留本地。
 
 ---
 
@@ -344,17 +345,16 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 - **数据分析**: Jupyter Notebook + Pandas + Matplotlib + Seaborn
 - **评估**: scikit-learn（混淆矩阵 / ROC / 分类报告）+ 自实现 ECE/NLL
 - **可解释性**: Grad-CAM 热力图（纯手写，无第三方依赖）
-- **质量保证**: pytest（285 项通过）+ ruff（通过）+ mypy（全项目 47 源文件 0 错误）
+- **质量保证**: 最近相关回归43项通过；此前312项唯一用例通过，Ruff/mypy通过。本次仅编辑设计与Git边界，未重新执行完整训练测试。
 
 ## 项目状态与限制
 
 - 第四轮审核提出的 U01–U04/PB06 已直接修复并通过本轮验收：完整pytest285项、
-  Ruff、mypy47源文件和依赖检查通过，详情见 [PROJECT_REVIEW.md](PROJECT_REVIEW.md)。
+  Ruff、mypy47源文件和依赖检查通过，详细审核见本地 `docs/PROJECT_REVIEW.md`。
 - 新版checkpoint v3记录真实更新/尝试数及完整进度；状态预检、失败事务回滚、
   真实CUDA AMP OFF/ON恢复均通过。v1/v2不支持精确续训，历史权重仍可推理/评估。
 - 正式准入现在绑定实际源码/配置/模型/臂/seeds/数据/预算，验证真实last/best和完整
-  history/config/meta；仅结束训练会话不算完成实验。正式清单仍未创建，多seed正式
-  重训未执行，6个历史run保持非正式；历史评估分数继续按来源展示。
+  history/config/meta；仅结束训练会话不算完成实验。历史9个CE及本轮36个A–D均已冻结、执行并正式准入；6个更早的历史run保持非正式，按来源单独展示。
 - PB06安全优化已部署：128张Dataset取数的缓存文件检查384→6次，另做CSV/meta保护，
   主进程在消费批次和更新前再检查。3组完整两轮配对中位10.312→4.536s（-56.0%），
   历史、模型/BN及有效更新数完全一致；不外推三模型/90轮性能或准确率。
@@ -368,4 +368,12 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
   协议校验通过）→ 导出 → PublicTest 评估）。三者仅验证保存/恢复/导出/评估闭环可用，
   其评估分数（34.63% / 36.89% / 44.13%）**不代表正式结果**，已在 export_manifest 中标注来源。
 - 本项目由作者个人独立完成，无组员分工，不另列个人贡献清单；课程报告 DOCX / PPT 不再修改。
-- 当前独立审核与性能分析见 [PROJECT_REVIEW.md](PROJECT_REVIEW.md)，未完成项按该文档验收。
+- 当前结论和图表见[实验索引](analysis/README.md)；详细审核保留在本地 `docs/PROJECT_REVIEW.md`，下一轮按[结构方案](configs/plans/architecture_ce_v1.md)实施与验收。
+
+## Git中的实验产物边界
+
+保留源码、配置/冻结清单、[实验设计](configs/plans/architecture_ce_v1.md)、结论Markdown、小型聚合指标和图表。
+逐样本预测/概率、每run完整JSON、原始基准配对记录、训练日志/权重、CSV与缓存均留在本地，Git忽略。
+`docs/`整目录仍不跟踪。analysis采用结论/图表白名单，避免新评估目录被一次性全部加入Git。
+已有原始产物只从索引取消跟踪，本地字节保持不变；旧提交历史仍包含过去提交的数据，本次不重写历史。
+新检出可查看结论与图表，复算逐样本指标需要本地归档或按相同冻结配置重跑；参见[实验索引](analysis/README.md)。

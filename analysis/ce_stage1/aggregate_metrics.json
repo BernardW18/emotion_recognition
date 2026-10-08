@@ -1,0 +1,419 @@
+{
+  "schema_version": 1,
+  "role": "aggregate conclusions; raw run/evaluation records remain local",
+  "protocol_id": "comparison-ce-v1",
+  "protocol_sha256": "82089f0cc62e2bc40ffceeee826f72d68d862f7277bfe9ca2733e567d3619ee5",
+  "code_sha256": "a9b05cc1e4abf55561513216f09df491b37c5fdd0700fe7fbc95fa32990dce71",
+  "execution_git_commit": "cc195bd99360b1243fb7f031fc5b1adc2d10742f",
+  "source_results_sha256": "f23c07052b3ad03101df9e4aeed445bf90d9ac3459e4fe72a1a71e93f07ff07b",
+  "run_count": 9,
+  "sample_std_ddof": 1,
+  "budget": "90 epoch maximum with frozen early stopping",
+  "model_selection": "PublicTest val_acc; best.pth; frozen early stopping",
+  "evaluation": {
+    "device": "cpu",
+    "dtype": "float32",
+    "batch_size": 64
+  },
+  "aggregates": {
+    "mini_cnn": {
+      "n": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "PublicTest": {
+        "accuracy": {
+          "mean": 0.608618928206557,
+          "sample_std": 0.020388216843875442
+        },
+        "macro_f1": {
+          "mean": 0.5208339271194862,
+          "sample_std": 0.030759669960394663
+        },
+        "balanced_accuracy": {
+          "mean": 0.5209673849200644,
+          "sample_std": 0.023155304784469914
+        },
+        "ece": {
+          "mean": 0.0221789425156448,
+          "sample_std": 0.0036096900357658426
+        },
+        "nll": {
+          "mean": 1.0395553792181473,
+          "sample_std": 0.04837439595011857
+        },
+        "per_class_recall": {
+          "Angry": {
+            "mean": 0.5481798715203426,
+            "sample_std": 0.018544441194527604,
+            "support_each": 467
+          },
+          "Disgust": {
+            "mean": 0.05952380952380952,
+            "sample_std": 0.04493949068613541,
+            "support_each": 56
+          },
+          "Fear": {
+            "mean": 0.31451612903225806,
+            "sample_std": 0.046502268526898385,
+            "support_each": 496
+          },
+          "Happy": {
+            "mean": 0.8424581005586592,
+            "sample_std": 0.006220965768525188,
+            "support_each": 895
+          },
+          "Sad": {
+            "mean": 0.47166921898928027,
+            "sample_std": 0.04112012735711346,
+            "support_each": 653
+          },
+          "Surprise": {
+            "mean": 0.7767068273092369,
+            "sample_std": 0.007361567381455174,
+            "support_each": 415
+          },
+          "Neutral": {
+            "mean": 0.6337177375068643,
+            "sample_std": 0.033655251940789846,
+            "support_each": 607
+          }
+        }
+      },
+      "PrivateTest": {
+        "accuracy": {
+          "mean": 0.6197640939908982,
+          "sample_std": 0.021662109413174122
+        },
+        "macro_f1": {
+          "mean": 0.525699576333902,
+          "sample_std": 0.028867830630931172
+        },
+        "balanced_accuracy": {
+          "mean": 0.5265529780249739,
+          "sample_std": 0.022308629415852883
+        },
+        "ece": {
+          "mean": 0.019158502142996452,
+          "sample_std": 0.00577180327447101
+        },
+        "nll": {
+          "mean": 1.00779148910591,
+          "sample_std": 0.046546428806625205
+        },
+        "per_class_recall": {
+          "Angry": {
+            "mean": 0.5471826205023761,
+            "sample_std": 0.008479291240187923,
+            "support_each": 491
+          },
+          "Disgust": {
+            "mean": 0.05454545454545454,
+            "sample_std": 0.04810456929208346,
+            "support_each": 55
+          },
+          "Fear": {
+            "mean": 0.30303030303030304,
+            "sample_std": 0.04780086918228775,
+            "support_each": 528
+          },
+          "Happy": {
+            "mean": 0.875616230565036,
+            "sample_std": 0.0036570537584349303,
+            "support_each": 879
+          },
+          "Sad": {
+            "mean": 0.49607182940516276,
+            "sample_std": 0.037049788642523125,
+            "support_each": 594
+          },
+          "Surprise": {
+            "mean": 0.7331730769230769,
+            "sample_std": 0.007211538461538491,
+            "support_each": 416
+          },
+          "Neutral": {
+            "mean": 0.6762513312034079,
+            "sample_std": 0.04940038272031512,
+            "support_each": 626
+          }
+        }
+      },
+      "training_duration_seconds": {
+        "mean": 153.3153114000003,
+        "sample_std": 56.47695196518349
+      }
+    },
+    "vgg_lite": {
+      "n": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "PublicTest": {
+        "accuracy": {
+          "mean": 0.6153989040586979,
+          "sample_std": 0.03028909411205399
+        },
+        "macro_f1": {
+          "mean": 0.5039022219070066,
+          "sample_std": 0.03638150463129615
+        },
+        "balanced_accuracy": {
+          "mean": 0.5146626420822678,
+          "sample_std": 0.029370300985665565
+        },
+        "ece": {
+          "mean": 0.09005703141765253,
+          "sample_std": 0.018877779641996145
+        },
+        "nll": {
+          "mean": 1.052260867632748,
+          "sample_std": 0.07661872740675182
+        },
+        "per_class_recall": {
+          "Angry": {
+            "mean": 0.5481798715203426,
+            "sample_std": 0.10870269932759792,
+            "support_each": 467
+          },
+          "Disgust": {
+            "mean": 0.005952380952380952,
+            "sample_std": 0.010309826235529031,
+            "support_each": 56
+          },
+          "Fear": {
+            "mean": 0.22043010752688172,
+            "sample_std": 0.10093405901804299,
+            "support_each": 496
+          },
+          "Happy": {
+            "mean": 0.8722532588454376,
+            "sample_std": 0.02161753722298912,
+            "support_each": 895
+          },
+          "Sad": {
+            "mean": 0.5344563552833078,
+            "sample_std": 0.01856716026490377,
+            "support_each": 653
+          },
+          "Surprise": {
+            "mean": 0.7783132530120482,
+            "sample_std": 0.043839531081109016,
+            "support_each": 415
+          },
+          "Neutral": {
+            "mean": 0.643053267435475,
+            "sample_std": 0.010969239074924869,
+            "support_each": 607
+          }
+        }
+      },
+      "PrivateTest": {
+        "accuracy": {
+          "mean": 0.6223646326739111,
+          "sample_std": 0.03293289624697298
+        },
+        "macro_f1": {
+          "mean": 0.5060911460909367,
+          "sample_std": 0.03702433823344615
+        },
+        "balanced_accuracy": {
+          "mean": 0.5195859680288011,
+          "sample_std": 0.029125456019543524
+        },
+        "ece": {
+          "mean": 0.09705534082325076,
+          "sample_std": 0.014076326385764198
+        },
+        "nll": {
+          "mean": 1.027165390263082,
+          "sample_std": 0.08585432020213127
+        },
+        "per_class_recall": {
+          "Angry": {
+            "mean": 0.548540393754243,
+            "sample_std": 0.10093973466188867,
+            "support_each": 491
+          },
+          "Disgust": {
+            "mean": 0.0,
+            "sample_std": 0.0,
+            "support_each": 55
+          },
+          "Fear": {
+            "mean": 0.2159090909090909,
+            "sample_std": 0.12345521581615351,
+            "support_each": 528
+          },
+          "Happy": {
+            "mean": 0.8866135760333712,
+            "sample_std": 0.01938472190994626,
+            "support_each": 879
+          },
+          "Sad": {
+            "mean": 0.5611672278338945,
+            "sample_std": 0.005411700763744671,
+            "support_each": 594
+          },
+          "Surprise": {
+            "mean": 0.734775641025641,
+            "sample_std": 0.051350865288500316,
+            "support_each": 416
+          },
+          "Neutral": {
+            "mean": 0.6900958466453674,
+            "sample_std": 0.02253472201224578,
+            "support_each": 626
+          }
+        }
+      },
+      "training_duration_seconds": {
+        "mean": 252.18403836666525,
+        "sample_std": 142.1957797336055
+      }
+    },
+    "micro_resnet": {
+      "n": 3,
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "PublicTest": {
+        "accuracy": {
+          "mean": 0.6425188074672611,
+          "sample_std": 0.002176163186376858
+        },
+        "macro_f1": {
+          "mean": 0.5926193048736146,
+          "sample_std": 0.005843270490868457
+        },
+        "balanced_accuracy": {
+          "mean": 0.5865864578793925,
+          "sample_std": 0.004388926509749423
+        },
+        "ece": {
+          "mean": 0.0500707726500388,
+          "sample_std": 0.005131412334517882
+        },
+        "nll": {
+          "mean": 0.9832250721107539,
+          "sample_std": 0.0021646525754479566
+        },
+        "per_class_recall": {
+          "Angry": {
+            "mean": 0.6009992862241257,
+            "sample_std": 0.017440102388109377,
+            "support_each": 467
+          },
+          "Disgust": {
+            "mean": 0.3273809523809524,
+            "sample_std": 0.04493949068613542,
+            "support_each": 56
+          },
+          "Fear": {
+            "mean": 0.34274193548387094,
+            "sample_std": 0.03445162800531262,
+            "support_each": 496
+          },
+          "Happy": {
+            "mean": 0.8625698324022346,
+            "sample_std": 0.00872653595073367,
+            "support_each": 895
+          },
+          "Sad": {
+            "mean": 0.48749361919346607,
+            "sample_std": 0.019750425852121587,
+            "support_each": 653
+          },
+          "Surprise": {
+            "mean": 0.8056224899598394,
+            "sample_std": 0.005016062649315968,
+            "support_each": 415
+          },
+          "Neutral": {
+            "mean": 0.6792970895112576,
+            "sample_std": 0.012143516961831973,
+            "support_each": 607
+          }
+        }
+      },
+      "PrivateTest": {
+        "accuracy": {
+          "mean": 0.6476270084517507,
+          "sample_std": 0.003762353320428921
+        },
+        "macro_f1": {
+          "mean": 0.5876457927553217,
+          "sample_std": 0.01149293032295421
+        },
+        "balanced_accuracy": {
+          "mean": 0.58340981426653,
+          "sample_std": 0.008731384431978599
+        },
+        "ece": {
+          "mean": 0.03979275881098187,
+          "sample_std": 0.004417082613957064
+        },
+        "nll": {
+          "mean": 0.9404117355398833,
+          "sample_std": 0.0033144653732402095
+        },
+        "per_class_recall": {
+          "Angry": {
+            "mean": 0.6028513238289206,
+            "sample_std": 0.012388518391646073,
+            "support_each": 491
+          },
+          "Disgust": {
+            "mean": 0.2909090909090909,
+            "sample_std": 0.05454545454545455,
+            "support_each": 55
+          },
+          "Fear": {
+            "mean": 0.3194444444444444,
+            "sample_std": 0.021538790541959552,
+            "support_each": 528
+          },
+          "Happy": {
+            "mean": 0.8850967007963595,
+            "sample_std": 0.012820736825466066,
+            "support_each": 879
+          },
+          "Sad": {
+            "mean": 0.49775533108866443,
+            "sample_std": 0.02197168569074286,
+            "support_each": 594
+          },
+          "Surprise": {
+            "mean": 0.7684294871794871,
+            "sample_std": 0.013668847843935895,
+            "support_each": 416
+          },
+          "Neutral": {
+            "mean": 0.7193823216187434,
+            "sample_std": 0.019845202506479424,
+            "support_each": 626
+          }
+        }
+      },
+      "training_duration_seconds": {
+        "mean": 126.9513693000008,
+        "sample_std": 3.831050608056805
+      }
+    }
+  },
+  "limitations": [
+    "Official split retained; not deduplicated training.",
+    "280 PublicTest and 288 PrivateTest rows overlap Training by exact pixels; no identity-disjoint claim.",
+    "Three seeds only; mean and sample std are descriptive, not a significance claim.",
+    "Existing model activation/dropout differ; this is not an isolated topology-only ablation.",
+    "Only CE arm A completed; Focal/sampling/CB-Focal and AMP OFF experiments remain unexecuted.",
+    "Historical trained weights used different training settings; they are not controlled CE comparison arms.",
+    "Training durations come from last complete checkpoint; process startup and final evaluations are excluded."
+  ]
+}
