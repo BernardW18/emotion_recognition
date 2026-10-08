@@ -1,6 +1,6 @@
 # MicroResNet 结构对照实验方案 v1
 
-日期：2026-10-08。状态：四组结构、配置和执行工具已实现并验收；已冻结为comparison-architecture-ce-v1。
+日期：2026-10-08。状态：comparison-architecture-ce-v1的12/12训练与36份评估均已完成。
 实际执行状态保存在本地analysis/architecture_ce_v1/experiment_state.json；本设计文档不等于实验结果。
 适用项目：emotion_recognition，Windows `.venv\Scripts\python.exe`。研究范围仍为 FER2013 七分类。
 
@@ -161,3 +161,12 @@ Ruff、mypy40源文件、pip check通过；S0与8aaf41b之前原模型的初始�
 旧v1加载一致；四组真实模型连续与恢复训练一致，错误池化协议拒绝且不改参数；
 CPU/CUDA batch1与batch128形状正确，CUDA batch128 AMP有有效更新且参数有限。
 实测参数/MACs已列在第二节。251个历史产物SHA一致，报告/PPT未修改。
+
+## 10. 执行结果（2026-10-08 19:21，Asia/Shanghai）
+
+12个run各完成90轮并通过正式准入；Training/Public/Private各12份评估，候选先于Private固定。
+S1通过质量与部署门槛，Public accuracy相对S0+1.64pp、macro-F1+2.66pp，三个seed均改善，
+参数仍753,991，CPU P95约1.28倍。S2质量通过但CPU P95约1.78倍，未过部署门槛；
+S3未过质量门槛。三seed为描述性证据，保留负结果。
+结论、七类统计和图表见[RESULTS](../../analysis/architecture_ce_v1/RESULTS.md)。
+总执行约74.6分钟；历史归档在执行结束时SHA验证一致。演示权重未自动替换。

@@ -9,7 +9,7 @@ Git只保存聚合结论、必要来源指纹、图表与分析源代码；原�
 | 历史AMP配对基准 | [聚合指标](benchmark_amp/aggregate_metrics.json)及根README的结果说明 | benchmark_amp/results.json（含逐配对记录） |
 | 数据质量审计 | [聚合审计](data_audit.json)；不含原始像素 | data/fer2013.csv、data/cache/ |
 | 历史效率基准 | [参数/MACs/延迟聚合](efficiency_results.json)；不含逐次计时序列 | 运行时原始计时与训练输出 |
-| 下一轮结构对照 | [12-run设计方案](../configs/plans/architecture_ce_v1.md) | 尚未生成新结构实验数据 |
+| 结构CE正式实验 | [结论](architecture_ce_v1/RESULTS.md)、[聚合指标](architecture_ce_v1/aggregate_metrics.json)、[图](architecture_ce_v1/architecture_comparison.png)、[方案](../configs/plans/architecture_ce_v1.md) | architecture_ce_v1/results.json、experiment_state.json、efficiency_raw.json、evaluations/；training/runs/ |
 
 `aggregate_metrics.json`仅存各组均值/样本std、类别支持数、计划/来源SHA及整体流程验收。
 不存逐样本标签/预测/概率、每run完整元数据、训练历史或checkpoint。

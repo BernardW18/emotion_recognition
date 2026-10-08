@@ -137,13 +137,15 @@ pip install -e ".[dev]"
 
 ### 3. 训练模型
 
-**当前正式实验：固定90轮A–D已完成。** `comparison-fixed-abcd-v3`，三模型×四臂×seeds42/43/44，
+**已完成损失/采样实验：固定90轮A–D。** `comparison-fixed-abcd-v3`，三模型×四臂×seeds42/43/44，
 36个run均完整90轮并通过准入；Public/Private共72份评估，候选判断只用PublicTest。
 [固定预算结论与图表](analysis/fixed_abcd_v3/RESULTS.md)、[聚合指标](analysis/fixed_abcd_v3/aggregate_metrics.json)。
 历史允许早停CE的9个run单独保留，不能混为完整90轮基线。
-下一轮为[MicroResNet结构对照方案](configs/plans/architecture_ce_v1.md)：S0原结构、S1延后池化、S2加深、S3 SE，
-各3seed，共12个run；结构与工具已实现并验收，已冻结为 `comparison-architecture-ce-v1`。
-执行入口按固定顺序训练，结束后自动完成统一评估与结论/图表；完成状态以本地执行记录为准。
+本轮[MicroResNet结构对照方案](configs/plans/architecture_ce_v1.md)：S0原结构、S1延后池化、S2加深、S3 SE，
+各3seed，共12个run，已于2026-10-08完整训练90轮并完成Training/Public/Private共36份评估。
+协议 `comparison-architecture-ce-v1`；Public预设标准选择S1（延后池化），准确率+1.64pp、宏F1+2.66pp，
+参数量不变，CPU P95约为S0的1.28倍。[结构实验结论与图表](analysis/architecture_ce_v1/RESULTS.md)。
+推理演示权重尚未更新；完整原始预测/运行记录继续保留本地。
 
 本轮结构实验的执行入口（已存在执行记录时必须用 `--resume` 继续同run）：
 
