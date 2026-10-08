@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 
 from utils.activations import get_activation
+from utils.model_structure import validate_micro_structure
 
 
 class SEBlock(nn.Module):
@@ -74,7 +75,8 @@ class ResidualBlock(nn.Module):
 
 class MicroResNet(nn.Module):
     def __init__(self, num_classes: int = 7, dropout: float = 0.3,
-                 activation: str = "relu", use_se: bool = False):
+                 activation: str = "relu", use_se: bool = False, *,
+                 blocks=(2, 2), channels=(64, 128), pool_order="before_stage1"):
         """
         Args:
             num_classes: 分类类别数
@@ -82,35 +84,39 @@ class MicroResNet(nn.Module):
             activation: 激活函数名称，支持 relu / leaky_relu / elu / gelu
         """
         super().__init__()
+        self.blocks, self.channels, self.pool_order = validate_micro_structure(
+            blocks, channels, pool_order,
+        )
+        c1, c2 = self.channels
         act = get_activation(activation)
 
         # Stem: 48 -> 24
         self.stem = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(1, c1, kernel_size=3, padding=1),
+            nn.BatchNorm2d(c1),
             act,
             nn.MaxPool2d(2, 2),
         )
 
         # Stage 1: 24 -> 12, 64 channels
         self.downsample1 = nn.Sequential(
-            nn.Conv2d(64, 64, kernel_size=1),
+            nn.Conv2d(c1, c1, kernel_size=1),
             nn.AvgPool2d(2, 2),
         )
         self.stage1 = nn.Sequential(
-            ResidualBlock(64, activation=activation, use_se=use_se),
-            ResidualBlock(64, activation=activation, use_se=use_se),
+            *(ResidualBlock(c1, activation=activation, use_se=use_se)
+              for _ in range(self.blocks[0])),
         )
 
         # Stage 2: 12 -> 6, 128 channels
         self.channel_expand2 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=1),
-            nn.BatchNorm2d(128),
+            nn.Conv2d(c1, c2, kernel_size=1),
+            nn.BatchNorm2d(c2),
         )
         self.downsample2 = nn.AvgPool2d(2, 2)
         self.stage2 = nn.Sequential(
-            ResidualBlock(128, activation=activation, use_se=use_se),
-            ResidualBlock(128, activation=activation, use_se=use_se),
+            *(ResidualBlock(c2, activation=activation, use_se=use_se)
+              for _ in range(self.blocks[1])),
         )
 
         # Global Average Pooling + Classifier
@@ -118,15 +124,19 @@ class MicroResNet(nn.Module):
         self.classifier = nn.Sequential(
             nn.Flatten(),
             nn.Dropout(dropout),
-            nn.Linear(128, num_classes),
+            nn.Linear(c2, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
 
-        # Stage 1: downsample then residual blocks
-        x = self.downsample1(x)
+        # Keep the 1x1 convolution and its state_dict key identical across pool orders.
+        x = self.downsample1[0](x)
+        if self.pool_order == "before_stage1":
+            x = self.downsample1[1](x)
         x = self.stage1(x)
+        if self.pool_order == "after_stage1":
+            x = self.downsample1[1](x)
 
         # Stage 2: expand channels, downsample, then residual blocks
         x = self.channel_expand2(x)

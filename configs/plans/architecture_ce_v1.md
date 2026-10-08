@@ -1,6 +1,6 @@
 # MicroResNet 结构对照实验方案 v1
 
-日期：2026-10-08。状态：设计定稿草案；变体尚未实现，清单尚未冻结，本轮未启动新的长训练。
+日期：2026-10-08。状态：四组结构、配置、执行/评估工具已实现；回归与冻结完成后执行12-run训练。
 适用项目：emotion_recognition，Windows `.venv\Scripts\python.exe`。研究范围仍为 FER2013 七分类。
 
 ## 1. 研究问题与已有证据
@@ -21,15 +21,17 @@ accuracy 均值78.01%、macro-F1均值77.27%。约10.9个百分点的准确率�
 所有臂使用同一训练配方，唯一变化为本表结构因素。S0也在新源码/协议下重新从头训练3次，
 不混用历史 v3 的 A run；历史数据完整保留，仅作为背景。
 
-| 臂 | 结构定义 | 唯一改变 | 预期参数量 | 估算MACs（batch1） |
+| 臂 | 结构定义 | 唯一改变 | 参数量（实测） | MACs（batch1实测） |
 |---|---|---|---:|---:|
 | S0 | blocks=[2,2]，channels=[64,128]，pool=before_stage1，SE=false | 新协议基线 | 753,991 | 47.33M |
 | S1 | blocks=[2,2]，channels=[64,128]，pool=after_stage1，SE=false | 第一组平均池化的位置 | 753,991 | 111.04M |
 | S2 | blocks=[4,4]，channels=[64,128]，pool=before_stage1，SE=false | 残差块数量 | 1,493,575 | 89.80M |
 | S3 | blocks=[2,2]，channels=[64,128]，pool=before_stage1，SE=true | 现有 SE 模块 | 764,663 | 约47.34M |
 
-数字按当前卷积/线性层推导；不是新变体的实测结果，冻结前必须以真实构造核算。
-MACs按一个乘加记1 MAC、FLOPs=2×MACs，说明计数器覆盖范围；池化、激活等不能冒充免费。
+2026-10-08真实构造核算：S0/S1/S2/S3分别为753,991/753,991/1,493,575/764,663参数，
+MACs分别为47,334,272/111,035,264/89,801,600/47,344,512。使用torch flop_counter，
+一个乘加记1 MAC、FLOPs=2×MACs；计数器未覆盖的池化/激活不算在MACs内，其代价包含在实测延迟中。
+这些数字是结构成本，不是准确率结果。
 
 S1严格只移动 `downsample1` 中的 AvgPool：1×1卷积仍在24×24执行；stage1在24×24执行后
 再池化到12×12，随后 channel_expand2 和 downsample2 将特征送到6×6的 stage2。
@@ -65,8 +67,9 @@ seeds=42/43/44。执行顺序按seed分块轮换：
 
 ## 4. 开始训练前的实现与冻结条件
 
-当前ModelSpec v1没有 blocks/channels/pool_order字段，当前配置校验也不接受这些新结构键。
-不能只改模型类内部后沿用旧model_spec。实现阶段必须：
+原ModelSpec v1未记录 blocks/channels/pool_order。本轮已新增MicroResNet v2结构规格与配置校验；
+旧v1按明确的原结构构造，旧结构配置继续生成v1，以保持历史绑定兼容。完整显式结构字段的
+新配置生成v2。以下实现与冻结验收条件继续有效：
 
 1. 让真实模型构造显式接收并验证 blocks、channels、pool_order、use_se；保存到新版本规格。
    已知v1原结构按明确兼容规则加载，不静默套用新变体默认值；原权重预测保持一致。
@@ -78,7 +81,7 @@ seeds=42/43/44。执行顺序按seed分块轮换：
 5. 用于结构对照的汇总器不能直接调用现有仅支持A–D损失/采样的summarize_ablation臂检查；
    新入口须验证S0–S3实际结构、每臂完整三seed、无重复/挑选run、完整90轮和正式资格。
 6. 完成必要回归后提交源码和配置，工作区干净时运行freeze_comparison，生成新且唯一的
-   `configs/protocols/comparison-architecture-ce-v1.json`；冻结12项实际plan、数据/代码指纹。
+   `configs/protocols/comparison-architecture-ce-v1.json`；冻结4臂实际plan及各3个seed（共12项执行）、数据/代码指纹。
    本设计稿不是可执行冻结清单；清单未生成前不启动formal训练。
 
 流程验收：12个run各90轮、结束原因budget、真实last/best和有效更新记录均通过正式准入。
@@ -132,3 +135,15 @@ Git保留：本设计稿、源码/配置/冻结清单、`analysis/<实验>/RESUL
 
 预计发布图：七类召回对照、Public宏F1/accuracy与CPU P95的权衡、训练/验证曲线与泛化差距。
 没有实际数据前不绘制性能结果图，也不把表中估算成本当成训练效果。
+
+## 8. 代码入口与文档归属
+
+四臂配置为 `configs/architecture_s0_config.yaml` 至 `architecture_s3_config.yaml`。
+执行入口 `tools/run_architecture_comparison.py` 按固定顺序训练，显式 `--resume` 才能继续同run，
+不挑选新seed；完成后调用 `tools/summarize_architecture.py` 与 `tools/benchmark_architecture.py`。
+汇总器验证四臂真实结构、共同配方、完整90轮、正式准入、完整三seed与保存预测复算；
+候选保存时间和SHA后才访问PrivateTest。原始数据在 `analysis/architecture_ce_v1/` 本地保留，
+Git仅追踪RESULTS、聚合摘要和图表。工具运行不依赖docs目录。
+
+`docs/`是用户要求整目录忽略的本地审核区；本方案需要随源码保留和追溯，
+因此唯一版本化方案放在 `configs/plans/`，本地docs只记录审核和执行状态。

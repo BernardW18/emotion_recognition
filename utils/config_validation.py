@@ -19,6 +19,7 @@ import math
 from typing import Any, NoReturn
 
 from utils.activations import ACTIVATION_REGISTRY
+from utils.model_structure import STRUCTURE_FIELDS, validate_micro_structure
 
 logger = logging.getLogger("config_validation")
 
@@ -51,7 +52,7 @@ _ALLOWED_TRAINING_KEYS = {
 }
 _ALLOWED_MODEL_KEYS = {
     "learning_rate", "batch_size", "num_epochs", "dropout", "activation",
-    "scheduler_t0", "use_se",
+    "scheduler_t0", "use_se", "blocks", "channels", "pool_order",
 }
 _ALLOWED_CHECKPOINT_KEYS = {
     "save_best", "save_every_n_epochs", "monitor_metric", "max_checkpoint_files",
@@ -281,6 +282,14 @@ def validate_config(config: dict, *, model_name: str | None = None) -> None:
         if not isinstance(mcfg, dict):
             _fail(f"models.{name}", f"必须是 dict，得到 {type(mcfg).__name__}")
         _check_unknown(mcfg, _ALLOWED_MODEL_KEYS, f"models.{name}")
+        structure = STRUCTURE_FIELDS.intersection(mcfg)
+        if structure:
+            if name != "micro_resnet" or structure != STRUCTURE_FIELDS:
+                _fail(f"models.{name}", "结构字段仅支持MicroResNet且必须完整提供")
+            try:
+                validate_micro_structure(mcfg["blocks"], mcfg["channels"], mcfg["pool_order"])
+            except ValueError as exc:
+                _fail(f"models.{name}", str(exc))
         if name == model_name:
             required = {"learning_rate", "dropout", "activation"}
             missing = sorted(required - set(mcfg))

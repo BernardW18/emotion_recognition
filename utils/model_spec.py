@@ -46,10 +46,17 @@ import torch
 
 from utils.activations import ACTIVATION_REGISTRY
 from utils.constants import CLASS_NAMES
+from utils.model_structure import (
+    DEFAULT_BLOCKS,
+    DEFAULT_CHANNELS,
+    DEFAULT_POOL_ORDER,
+    STRUCTURE_FIELDS,
+    validate_micro_structure,
+)
 
 logger = logging.getLogger("model_spec")
 
-MODEL_SPEC_VERSION = 1
+MODEL_SPEC_VERSION = 2
 SUPPORTED_MODELS = ("mini_cnn", "vgg_lite", "micro_resnet")
 SUPPORTED_IMAGE_SIZE = 48
 SUPPORTED_INPUT_CHANNELS = 1
@@ -89,13 +96,16 @@ class ModelSpec:
     normalize: str
     spec_source: str = "training"
     migration_notes: tuple[str, ...] = field(default_factory=tuple)
+    blocks: tuple[int, ...] | None = None
+    channels: tuple[int, ...] | None = None
+    pool_order: str | None = None
 
     @property
     def num_classes(self) -> int:
         return len(self.class_names)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "spec_version": self.spec_version,
             "model_name": self.model_name,
             "class_names": list(self.class_names),
@@ -108,6 +118,10 @@ class ModelSpec:
             "spec_source": self.spec_source,
             "migration_notes": list(self.migration_notes),
         }
+        if self.spec_version == 2:
+            result.update(blocks=list(self.blocks or ()), channels=list(self.channels or ()),
+                          pool_order=self.pool_order)
+        return result
 
     def display_summary(self) -> str:
         """人类可读摘要（应用/日志展示用）。"""
@@ -124,9 +138,9 @@ class ModelSpec:
             raise ValueError(f"model_spec 必须是 dict，得到 {type(data).__name__}")
 
         version = data.get("spec_version")
-        if version != MODEL_SPEC_VERSION:
+        if type(version) is not int or version not in (1, 2):
             raise ValueError(
-                f"不支持的 model_spec 版本: {version!r}（当前支持 {MODEL_SPEC_VERSION}）"
+                f"不支持的 model_spec 版本: {version!r}（当前支持 1/2）"
             )
 
         model_name = data.get("model_name")
@@ -156,7 +170,9 @@ class ModelSpec:
 
         if "use_se" not in data:
             raise ValueError("model_spec 缺少 use_se 字段（必须显式提供）")
-        use_se = bool(data["use_se"])
+        if type(data["use_se"]) is not bool:
+            raise ValueError("model_spec.use_se 必须为布尔值")
+        use_se = data["use_se"]
         if use_se and model_name not in SE_SUPPORTED_MODELS:
             raise ValueError(f"{model_name} 不支持 use_se")
 
@@ -178,8 +194,23 @@ class ModelSpec:
             raise ValueError("migration_notes 必须是字符串列表")
         migration_notes = tuple(str(n) for n in migration_notes)
 
+        blocks: tuple[int, ...] | None = None
+        channels: tuple[int, ...] | None = None
+        pool_order: str | None = None
+        if version == 1:
+            if STRUCTURE_FIELDS.intersection(data):
+                raise ValueError("model_spec v1 固定原结构，结构字段必须使用 v2")
+        else:
+            if model_name != "micro_resnet":
+                raise ValueError("model_spec v2 结构字段仅支持 micro_resnet")
+            if not STRUCTURE_FIELDS.issubset(data):
+                raise ValueError("model_spec v2 缺少 blocks/channels/pool_order")
+            blocks, channels, pool_order = validate_micro_structure(
+                data["blocks"], data["channels"], data["pool_order"],
+            )
+
         return cls(
-            spec_version=MODEL_SPEC_VERSION,
+            spec_version=version,
             model_name=model_name,
             class_names=class_names,
             activation=activation,
@@ -190,6 +221,7 @@ class ModelSpec:
             normalize=normalize,
             spec_source=str(data.get("spec_source", "unknown")),
             migration_notes=migration_notes,
+            blocks=blocks, channels=channels, pool_order=pool_order,
         )
 
 
@@ -231,6 +263,9 @@ def build_model_from_spec(
             dropout=dropout,
             activation=spec.activation,
             use_se=spec.use_se,
+            blocks=DEFAULT_BLOCKS if spec.spec_version == 1 else spec.blocks,
+            channels=DEFAULT_CHANNELS if spec.spec_version == 1 else spec.channels,
+            pool_order=DEFAULT_POOL_ORDER if spec.spec_version == 1 else spec.pool_order,
         )
     raise ValueError(f"未知模型名: {spec.model_name!r}")
 
@@ -283,9 +318,12 @@ def make_spec_from_config(config: dict[str, Any], model_name: str) -> ModelSpec:
             f"（data.image_size={image_size} 不被支持）"
         )
 
+    structure = STRUCTURE_FIELDS.intersection(model_cfg)
+    if structure and (model_name != "micro_resnet" or structure != STRUCTURE_FIELDS):
+        raise ValueError("结构字段仅支持 MicroResNet，且 blocks/channels/pool_order 必须全部提供")
     return ModelSpec.from_dict(
         {
-            "spec_version": MODEL_SPEC_VERSION,
+            "spec_version": 2 if structure else 1,
             "model_name": model_name,
             "class_names": list(class_names),
             "activation": str(activation),
@@ -295,6 +333,7 @@ def make_spec_from_config(config: dict[str, Any], model_name: str) -> ModelSpec:
             "image_size": image_size,
             "normalize": ALLOWED_NORMALIZE[0],
             "spec_source": "training",
+            **({key: model_cfg[key] for key in STRUCTURE_FIELDS} if structure else {}),
         }
     )
 
@@ -398,7 +437,7 @@ def resolve_spec_from_checkpoint(
         )
 
     partial: dict[str, Any] = {
-        "spec_version": MODEL_SPEC_VERSION,
+        "spec_version": 1,
         "model_name": model_name,
         "class_names": class_names,
         "activation": activation,

@@ -43,7 +43,7 @@
   88.4%（workers=0）/ 39.0%（workers=4））；uint8 像素缓存（工厂加载 8.7→0.24s，逐位一致）；
   评估快速路径（完整评估 -96.0%）；Grad-CAM 按需 + 缓存（命中 -92.6%~-95.5%）；
   fused Adam 为可选项（默认关，实测 ~4.9–5.2%）。
-- **质量门槛**：项目现有312项pytest用例通过（全量309项后补验路径异常3例，相关模块再次通过）；ruff、mypy（49源文件）及依赖检查通过。
+- **质量门槛**：本轮全量336项通过，随后新增/强化结构逻辑的25项针对性回归通过，共339个唯一用例；Ruff、mypy（40源文件）及依赖检查通过。
 
 ---
 
@@ -102,7 +102,7 @@ emotion_recognition/
 │   ├── comparison_report.ipynb  # 三模型对比分析
 │   └── confusion_matrices/  roc_curves/  training_curves/
 ├── docs/                        # 全部为本地文档，Git不跟踪；运行不依赖此目录
-├── tests/                       # 测试（312 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
+├── tests/                       # 测试（339 项：核心/训练管线/推理/应用/配置/像素缓存/批级增强/推理服务/fused/续训完整性/准入）
 ├── pyproject.toml               # 项目配置 + ruff + mypy
 ├── requirements.txt             # 依赖安装入口（CUDA 组合）
 └── README.md
@@ -142,7 +142,7 @@ pip install -e ".[dev]"
 [固定预算结论与图表](analysis/fixed_abcd_v3/RESULTS.md)、[聚合指标](analysis/fixed_abcd_v3/aggregate_metrics.json)。
 历史允许早停CE的9个run单独保留，不能混为完整90轮基线。
 下一轮为[MicroResNet结构对照方案](configs/plans/architecture_ce_v1.md)：S0原结构、S1延后池化、S2加深、S3 SE，
-各3seed，共12个run；目前是设计稿，尚未实现变体、生成可执行冻结清单或启动新训练。
+各3seed，共12个run；四组结构和执行/汇总工具已实现，回归后生成新冻结清单并启动训练。
 
 下面是未来新协议的冻结示例，不能用它覆盖已完成协议；实现及回归完成后再冻结实际结构配置。
 
@@ -345,11 +345,11 @@ AMP 配对基准（替代旧「1.4–1.8 倍」的外推数字；协议：同一
 - **数据分析**: Jupyter Notebook + Pandas + Matplotlib + Seaborn
 - **评估**: scikit-learn（混淆矩阵 / ROC / 分类报告）+ 自实现 ECE/NLL
 - **可解释性**: Grad-CAM 热力图（纯手写，无第三方依赖）
-- **质量保证**: 最近相关回归43项通过；此前312项唯一用例通过，Ruff/mypy通过。本次仅编辑设计与Git边界，未重新执行完整训练测试。
+- **质量保证**: 本轮全量336项通过，随后结构针对性25项通过，共339个唯一用例；Ruff、mypy（40源文件）、pip check通过。
 
 ## 项目状态与限制
 
-- 第四轮审核提出的 U01–U04/PB06 已直接修复并通过本轮验收：完整pytest285项、
+- 第四轮审核提出的 U01–U04/PB06 已直接修复并通过当时验收：完整pytest285项、
   Ruff、mypy47源文件和依赖检查通过，详细审核见本地 `docs/PROJECT_REVIEW.md`。
 - 新版checkpoint v3记录真实更新/尝试数及完整进度；状态预检、失败事务回滚、
   真实CUDA AMP OFF/ON恢复均通过。v1/v2不支持精确续训，历史权重仍可推理/评估。
