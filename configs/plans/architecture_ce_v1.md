@@ -1,6 +1,7 @@
 # MicroResNet 结构对照实验方案 v1
 
-日期：2026-10-08。状态：四组结构、配置、执行/评估工具已实现；回归与冻结完成后执行12-run训练。
+日期：2026-10-08。状态：四组结构、配置和执行工具已实现并验收；已冻结为comparison-architecture-ce-v1。
+实际执行状态保存在本地analysis/architecture_ce_v1/experiment_state.json；本设计文档不等于实验结果。
 适用项目：emotion_recognition，Windows `.venv\Scripts\python.exe`。研究范围仍为 FER2013 七分类。
 
 ## 1. 研究问题与已有证据
@@ -147,3 +148,16 @@ Git仅追踪RESULTS、聚合摘要和图表。工具运行不依赖docs目录。
 
 `docs/`是用户要求整目录忽略的本地审核区；本方案需要随源码保留和追溯，
 因此唯一版本化方案放在 `configs/plans/`，本地docs只记录审核和执行状态。
+
+## 9. 本轮冻结与实现验收
+
+实现提交：`8aaf41b75afd90aff0d4e50d10411e28a7ec931c`。
+源码/配置指纹：`0d57433b7b71dd8b6e0579e6c45d31aed491ebf2d1721d6d9b5a0602d8021690`。
+冻结清单：`configs/protocols/comparison-architecture-ce-v1.json`，4臂×3seed、每run90轮。
+冻结文件SHA-256：`ad03786c6153a87e04da046ddee0240c07637b46c4937f1270026513e22b6245`。旧A–D冻结文件不变。
+
+完整pytest336项通过；随后新增/强化结构逻辑的25项针对性回归通过，合计339个唯一用例。
+Ruff、mypy40源文件、pip check通过；S0与8aaf41b之前原模型的初始化权重/CPU前向逐位一致，
+旧v1加载一致；四组真实模型连续与恢复训练一致，错误池化协议拒绝且不改参数；
+CPU/CUDA batch1与batch128形状正确，CUDA batch128 AMP有有效更新且参数有限。
+实测参数/MACs已列在第二节。251个历史产物SHA一致，报告/PPT未修改。

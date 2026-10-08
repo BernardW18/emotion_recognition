@@ -142,9 +142,19 @@ pip install -e ".[dev]"
 [固定预算结论与图表](analysis/fixed_abcd_v3/RESULTS.md)、[聚合指标](analysis/fixed_abcd_v3/aggregate_metrics.json)。
 历史允许早停CE的9个run单独保留，不能混为完整90轮基线。
 下一轮为[MicroResNet结构对照方案](configs/plans/architecture_ce_v1.md)：S0原结构、S1延后池化、S2加深、S3 SE，
-各3seed，共12个run；四组结构和执行/汇总工具已实现，回归后生成新冻结清单并启动训练。
+各3seed，共12个run；结构与工具已实现并验收，已冻结为 `comparison-architecture-ce-v1`。
+执行入口按固定顺序训练，结束后自动完成统一评估与结论/图表；完成状态以本地执行记录为准。
 
-下面是未来新协议的冻结示例，不能用它覆盖已完成协议；实现及回归完成后再冻结实际结构配置。
+本轮结构实验的执行入口（已存在执行记录时必须用 `--resume` 继续同run）：
+
+```powershell
+$env:OMP_NUM_THREADS="4"
+$env:MKL_NUM_THREADS="4"
+$env:OPENBLAS_NUM_THREADS="4"
+.\.venv\Scripts\python.exe -B -u -X utf8 tools/run_architecture_comparison.py --protocol configs/protocols/comparison-architecture-ce-v1.json
+```
+
+以下保留历史冻结方式示例，不能覆盖已完成协议，也不用于本轮结构对照。
 
 定稿提交后冻结新方案（示例先冻结三个模型的 A；完整消融应追加三个模型的 B/C/D）：
 
